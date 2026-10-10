@@ -12,11 +12,11 @@ For https://obsproject.com/forum/resources/ → Add resource. Category: **OBS St
 
 **Minimum OBS Studio version:** 28.0.0
 
-**Source code URL:** _to fill in: the public repository_
+**Source code URL:** https://github.com/lilPZmods/obs-ptz-field-controller
 
 **Licence:** GPL-2.0-or-later
 
-**Download:** upload `dist/ptz-field-controller-1.1.0-macos-arm64.zip` (plugin) and `dist/ptz-field-controller-1.1.0-script.zip` (other platforms)
+**Download:** choose "external download URL" and give https://github.com/lilPZmods/obs-ptz-field-controller/releases/latest (or upload `dist/ptz-field-controller-1.1.0-macos-arm64.zip`)
 
 **Screenshots:** `packaging/screenshots/controller.png`, `packaging/screenshots/settings.png`
 
