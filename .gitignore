@@ -1,0 +1,14 @@
+# Holds the password and this site's cameras
+config.json
+config.json.part
+server.log
+# ffmpeg, if kept beside the bridge
+bin/
+# Headers and downloads for building the OBS plugin, and what gets built
+.build/
+dist/
+.venv/
+__pycache__/
+.DS_Store
+# Notes about this particular installation
+SITE.md
