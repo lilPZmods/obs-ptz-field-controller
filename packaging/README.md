@@ -12,7 +12,7 @@ Drive PTZ cameras from a game controller, in a dock inside OBS Studio or in any 
 
 ## What you need
 
-- OBS Studio 28 or later (earlier versions with browser docks should work but are untried).
+- OBS Studio 32 for the macOS plugin (it is built against OBS 32.2). The script works with OBS 28 or later.
 - Python 3.9 or later on the computer running OBS. Nothing else to install.
 - Cameras that take VISCA over IP on UDP, on the same network. Developed with Sony SRG cameras.
 - A game controller with the standard layout (Xbox, PlayStation and most others).

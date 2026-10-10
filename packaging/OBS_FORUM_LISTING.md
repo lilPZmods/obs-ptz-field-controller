@@ -10,7 +10,7 @@ For https://obsproject.com/forum/resources/ → Add resource. Category: **OBS St
 
 **Supported platforms:** macOS on Apple silicon as a compiled plugin; Windows, Linux and Intel Macs through the included OBS script
 
-**Minimum OBS Studio version:** 28.0.0
+**Minimum OBS Studio version:** 32.0.0 (the plugin is built against OBS 32.2)
 
 **Source code URL:** https://github.com/lilPZmods/obs-ptz-field-controller
 
