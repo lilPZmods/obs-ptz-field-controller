@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#0e1513" />
+    <title>PTZ / Field Controller</title>
+    <!-- Set before the page is drawn, so the light theme never flashes dark or the other way round. -->
+    <script>try { document.documentElement.dataset.theme = localStorage.getItem("ptz-theme") || "dark"; } catch { document.documentElement.dataset.theme = "dark"; }</script>
+    <link rel="stylesheet" href="/app.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <a class="wordmark" href="#" aria-label="PTZ Field Controller home">
+          <span class="mark" aria-hidden="true"><i></i><i></i><i></i></span>
+          <span>FIELD / PTZ</span>
+        </a>
+        <div class="connection-state" id="connectionState">
+          <span class="status-dot"></span><span id="connectionText">Looking for controller</span>
+        </div>
+        <button class="icon-button" id="themeToggle" type="button" title="Switch between dark and light" aria-label="Switch between dark and light">
+          <svg class="icon-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M19.5 14.2A7.8 7.8 0 0 1 9.8 4.5a7.8 7.8 0 1 0 9.7 9.7Z"/></svg>
+          <svg class="icon-sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3.8"/><path d="M12 3.5v2M12 18.5v2M3.5 12h2M18.5 12h2M6 6l1.4 1.4M16.6 16.6 18 18M6 18l1.4-1.4M16.6 7.4 18 6"/></svg>
+        </button>
+        <button class="icon-button" id="settingsToggle" type="button" title="Settings" aria-label="Open settings">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8.2a3.8 3.8 0 1 0 0 7.6 3.8 3.8 0 0 0 0-7.6Z"/><path d="m19.4 13.5 1.1.9-1.1 1.9-1.4-.5a7.6 7.6 0 0 1-1.5.9l-.3 1.5h-2.2l-.4-1.5a7.8 7.8 0 0 1-1.6-.1l-1 1.2-2-.9.2-1.5a7.5 7.5 0 0 1-1.2-1.3l-1.5.2-.8-2.1 1.2-.9a7.2 7.2 0 0 1 .1-1.7L6 8.7l.8-2 1.5.2a7.7 7.7 0 0 1 1.3-1.2l-.2-1.5 2.1-.8.9 1.2a7.5 7.5 0 0 1 1.7.1l.9-1.1 2 .8-.2 1.5a7.7 7.7 0 0 1 1.2 1.3l1.5-.2.8 2.1-1.2.9a7.4 7.4 0 0 1-.1 1.7Z"/></svg>
+        </button>
+      </header>
+
+      <section class="control-stage" aria-label="Camera control">
+        <h1 class="visually-hidden">PTZ Field Controller</h1>
+        <div class="stage-heading">
+          <div>
+            <p class="eyebrow">LIVE CAMERA CONTROL</p>
+            <div class="stage-actions">
+              <div class="menu-anchor">
+                <button class="quiet-button strong" id="feedButton" type="button" aria-haspopup="true">SWITCHER FEED</button>
+                <div class="menu" id="feedMenu" hidden>
+                  <button type="button" id="feedInBox" class="not-in-obs">POPUP BOX</button>
+                  <button type="button" id="feedInWindow" class="not-in-obs">NEW WINDOW</button>
+                  <button type="button" id="feedOnDevice">ANOTHER DEVICE</button>
+                </div>
+              </div>
+              <button class="quiet-button strong" id="inviteButton" type="button">INVITE COLLABORATORS</button>
+              <button class="quiet-button" id="refreshStreams" type="button" title="Look for the cameras' video streams again">REFRESH STREAMS</button>
+            </div>
+          </div>
+          <div class="active-readout"><span class="readout-label">ON AIR</span><strong id="activeCameraName">CAM 01</strong><span class="readout-meta" id="activePage"></span></div>
+        </div>
+
+        <div class="camera-strip" id="cameraStrip" role="group" aria-label="Select camera"></div>
+
+        <figure class="viewer" id="viewer" hidden>
+          <img id="viewerImage" alt="" />
+          <figcaption><span class="live-dot"></span><span id="viewerCaption"></span></figcaption>
+        </figure>
+        <p class="stream-pill" id="streamPill" role="alert" hidden><span class="pill-dot"></span><span id="streamPillText"></span><button id="refreshStream" type="button">REFRESH</button></p>
+
+        <div class="control-deck">
+          <section class="deck-panel motion-panel">
+            <div class="panel-heading"><div><span class="section-index">01</span><h2>Move</h2></div><span class="panel-hint">RIGHT STICK · PUSH FURTHER TO GO FASTER</span></div>
+            <div class="stick-layout">
+              <div class="stick-orbit"><span class="axis-label north">TILT +</span><span class="axis-label east">PAN +</span><span class="axis-label south">TILT −</span><span class="axis-label west">PAN −</span><div class="stick" id="stickVisual"><span></span></div><div class="crosshair"></div></div>
+              <div class="motion-notes"><div class="motion-readout"><span>STICK VECTOR</span><strong id="vectorReadout">0.00 / 0.00</strong></div><div class="motion-readout"><span>DRIVE</span><strong id="driveReadout">IDLE</strong></div><button class="stop-button" id="stopButton" type="button"><svg viewBox="0 0 20 20" aria-hidden="true"><rect x="5" y="5" width="10" height="10" rx="1"/></svg> STOP ALL</button></div>
+            </div>
+          </section>
+
+          <section class="deck-panel zoom-panel">
+            <div class="panel-heading"><div><span class="section-index">02</span><h2>Frame</h2></div><span class="panel-hint">LEFT STICK · PUSH FURTHER TO ZOOM FASTER</span></div>
+            <div class="zoom-control"><div class="zoom-track"><span class="zoom-end">WIDE</span><div class="zoom-rail"><span class="zoom-tick"></span><span class="zoom-tick"></span><span class="zoom-tick"></span><span class="zoom-tick"></span><span class="zoom-tick"></span><span class="zoom-knob" id="zoomKnob"></span></div><span class="zoom-end">TELE</span></div><div class="zoom-value"><span>ZOOM INPUT</span><strong id="zoomReadout">NEUTRAL</strong></div></div>
+          </section>
+
+          <section class="deck-panel balance-panel">
+            <div class="panel-heading"><div><span class="section-index">03</span><h2>Balance</h2></div><span class="panel-hint">FACE BUTTONS</span></div>
+            <div class="balance-grid">
+              <div class="balance-row"><span class="balance-name"><i class="swatch blue"></i>BLUE GAIN</span><div class="balance-keys"><kbd>X</kbd><span>LESS</span><kbd>Y</kbd><span>MORE</span></div></div>
+              <div class="balance-row"><span class="balance-name"><i class="swatch red"></i>RED GAIN</span><div class="balance-keys"><kbd>A</kbd><span>LESS</span><kbd>B</kbd><span>MORE</span></div></div>
+              <div class="balance-row"><span class="balance-name"><i class="swatch white"></i>BRIGHTNESS</span><div class="balance-keys"><kbd>↑</kbd><span>UP</span><kbd>↓</kbd><span>DOWN</span></div></div>
+            </div>
+            <p class="mode-note"><span class="mode-led"></span>GAIN NEEDS MANUAL WB · BRIGHTNESS NEEDS BRIGHT MODE</p>
+            <div class="mode-buttons"><button class="quiet-button" type="button" data-adjust="manual_white_balance">SET MANUAL WB</button><button class="quiet-button" type="button" data-adjust="bright_mode">SET BRIGHT MODE</button></div>
+          </section>
+
+          <section class="deck-panel quick-panel">
+            <div class="panel-heading"><div><span class="section-index">04</span><h2>Quick select</h2></div><span class="panel-hint">CONTROLLER BUTTON · KEYBOARD KEY</span></div>
+            <div class="trigger-guide" id="quickSelect"></div>
+            <p class="mode-note"><span class="mode-led"></span>TOP SPEED&nbsp;<b id="topSpeedValue">100%</b>&nbsp;· LT LOWER · RT HIGHER</p>
+          </section>
+        </div>
+
+        <footer class="bottomline"><span>DIRECT VISCA CONTROL</span><span>DEAD ZONE <b id="deadzoneValue">0.15</b></span><span id="gamepadName">CONNECT CONTROLLER</span></footer>
+      </section>
+
+      <aside class="settings-drawer" id="settingsDrawer" aria-hidden="true">
+        <div class="drawer-header"><div><p class="eyebrow">CONFIGURATION</p><h2>Settings</h2></div><button class="icon-button close-settings" id="settingsClose" type="button" aria-label="Close settings">×</button></div>
+
+        <label class="switch-row" for="darkModeInput"><span class="field-label">DARK MODE</span><input id="darkModeInput" type="checkbox" checked /><span class="switch" aria-hidden="true"></span></label>
+        <div class="drawer-divider"></div>
+
+        <div class="mapping-header"><div><p class="eyebrow">CAMERAS</p><h3>Addresses and select buttons</h3></div></div>
+        <p class="field-help mapping-help">Enter each camera's IP address. The VISCA port is 52381 on Sony cameras. The controller looks for a video stream on every camera by itself; fill in a stream address only if it doesn't find yours.</p>
+        <div class="camera-list" id="cameraList"></div>
+        <div class="drawer-actions"><button class="quiet-button" id="lookForStreams" type="button">LOOK FOR STREAMS AGAIN</button><button class="quiet-button strong" id="addCamera" type="button">+ ADD CAMERA</button></div>
+        <div class="drawer-divider"></div>
+
+        <div class="setting-row"><label class="field-label" for="deadzoneInput">STICK DEAD ZONE</label><output id="deadzoneOutput">15%</output></div>
+        <input class="range-input" id="deadzoneInput" type="range" min="5" max="35" value="15" />
+        <div class="setting-row sensitivity-setting"><label class="field-label" for="engageInput">MOVE ENGAGEMENT</label><output id="engageOutput">28%</output></div>
+        <input class="range-input" id="engageInput" type="range" min="10" max="70" value="28" />
+        <div class="drawer-divider"></div>
+        <div class="mapping-header"><div><p class="eyebrow">VDO.NINJA</p><h3>Switcher feed room</h3></div></div>
+        <p class="field-help mapping-help">The room was made up for you; VDO.Ninja needs no account. Open the director room on the computer at the switcher and share the switcher's picture and sound there. Change these only to use a room you already have.</p>
+        <div class="field-grid">
+          <label class="field-label" for="vdo_base">ADDRESS</label><input id="vdo_base" spellcheck="false" autocapitalize="off" />
+          <label class="field-label" for="vdo_room">ROOM</label><input id="vdo_room" maxlength="40" spellcheck="false" autocapitalize="off" />
+          <label class="field-label" for="vdo_feed">FEED NAME</label><input id="vdo_feed" maxlength="40" spellcheck="false" autocapitalize="off" />
+          <label class="field-label" for="vdo_password">ROOM PASSWORD</label><input id="vdo_password" maxlength="40" spellcheck="false" autocapitalize="off" />
+          <label class="field-label" for="vdo_codirector">CO-DIRECTOR PASSWORD</label><input id="vdo_codirector" maxlength="40" spellcheck="false" autocapitalize="off" />
+        </div>
+        <div class="drawer-actions"><button class="quiet-button" id="vdoNewRoom" type="button">NEW ROOM</button><button class="quiet-button strong" type="button" data-open-director>OPEN DIRECTOR ROOM</button></div>
+        <div class="drawer-divider"></div>
+        <div class="mapping-header"><div><p class="eyebrow">EMAIL</p><h3>Google account for invites</h3></div></div>
+        <p class="field-help mapping-help" id="googleStatus">Not signed in.</p>
+        <div class="drawer-actions"><span></span><button class="quiet-button strong" id="googleSignIn" type="button">SIGN IN WITH GOOGLE</button><button class="quiet-button" id="googleSignOut" type="button" hidden>SIGN OUT</button></div>
+        <p class="field-help mapping-help">Signing in lets the controller send invites as you through Gmail; it cannot read your mail. Google requires an OAuth client for this, made once in Google Cloud Console: enable the Gmail API, then Credentials → Create credentials → OAuth client ID → Desktop app, and paste its ID and secret here. Sign in from a browser on the computer running the controller.</p>
+        <div class="field-grid">
+          <label class="field-label" for="googleClientId">CLIENT ID</label><input id="googleClientId" spellcheck="false" autocapitalize="off" autocomplete="off" />
+          <label class="field-label" for="googleSecret">CLIENT SECRET</label><input id="googleSecret" type="password" autocomplete="new-password" />
+        </div>
+        <div class="drawer-divider"></div>
+        <div class="drawer-actions"><span></span><button class="save-button" id="saveSettings" type="button">SAVE SETTINGS</button></div>
+        <div class="module-reference"><span>HOW IT CONNECTS</span><p>Pan, tilt, zoom, brightness and colour are all sent straight to the cameras as VISCA commands, like a hardware joystick controller. Red and blue gain need the camera in manual white balance; brightness needs the Bright exposure mode.</p></div>
+      </aside>
+      <div class="drawer-scrim" id="drawerScrim"></div>
+
+      <div class="assign-prompt" id="assignPrompt" role="dialog" aria-modal="true" aria-labelledby="assignTitle" hidden>
+        <div class="assign-card" tabindex="-1" id="assignCard">
+          <p class="eyebrow">SELECT BUTTON</p>
+          <h3 id="assignTitle"></h3>
+          <p class="assign-text" id="assignText"></p>
+          <p class="assign-now" id="assignNow"></p>
+          <div class="drawer-actions"><button class="quiet-button" id="assignClear" type="button">CLEAR BUTTON</button><button class="save-button" id="assignDone" type="button">DONE</button></div>
+        </div>
+      </div>
+      <div class="feed-box" id="feedBox" hidden>
+        <div class="feed-bar" id="feedBar"><span>SWITCHER FEED</span><button type="button" id="feedPopOut" title="Move to its own window" aria-label="Move to its own window">↗</button><button type="button" id="feedClose" aria-label="Close the feed">×</button></div>
+        <iframe id="feedFrame" title="Switcher feed" allow="autoplay; fullscreen; picture-in-picture"></iframe>
+      </div>
+
+      <div class="assign-prompt" id="deviceDialog" role="dialog" aria-modal="true" aria-labelledby="deviceTitle" hidden>
+        <div class="assign-card">
+          <p class="eyebrow">ANOTHER DEVICE</p>
+          <h3 id="deviceTitle">Watch the switcher feed</h3>
+          <p class="assign-text">Point the iPad's or phone's camera at the code, or open the link on it. It shows the director's picture and sound only.</p>
+          <div class="qr" id="deviceQr"></div>
+          <input class="link-field" id="deviceLink" readonly aria-label="Feed link" />
+          <div class="drawer-actions"><button class="quiet-button" id="deviceCopy" type="button">COPY LINK</button><button class="save-button" id="deviceDone" type="button">DONE</button></div>
+        </div>
+      </div>
+
+      <div class="assign-prompt" id="inviteDialog" role="dialog" aria-modal="true" aria-labelledby="inviteTitle" hidden>
+        <div class="assign-card wide">
+          <p class="eyebrow" id="inviteRoom">VDO.NINJA ROOM</p>
+          <h3 id="inviteTitle">Invite collaborators</h3>
+          <p class="assign-text">Crew see and hear the director's feed only, unless you make them a co-director, which gives them the room's director controls.</p>
+          <p class="field-help" id="inviteFrom"></p>
+          <div class="crew-list" id="crewList"></div>
+          <div class="crew-add"><input id="crewEmail" type="email" placeholder="Crew email address" aria-label="Crew email address" spellcheck="false" autocapitalize="off" /><select id="crewRole" aria-label="What they can do"><option value="viewer" selected>VIEW FEED</option><option value="codirector">CO-DIRECTOR</option></select><button class="quiet-button strong" id="crewAdd" type="button">ADD</button></div>
+          <div class="drawer-actions"><button class="quiet-button" type="button" data-open-director>OPEN DIRECTOR ROOM</button><span class="spacer"></span><button class="quiet-button strong" id="inviteEveryone" type="button">EMAIL EVERYONE</button><button class="save-button" id="inviteDone" type="button">DONE</button></div>
+        </div>
+      </div>
+      <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    </main>
+    <script src="/qrcode.js" defer></script>
+    <script src="/app.js" defer></script>
+  </body>
+</html>
