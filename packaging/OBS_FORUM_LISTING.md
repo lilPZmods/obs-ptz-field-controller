@@ -6,7 +6,7 @@ For https://obsproject.com/forum/resources/ → Add resource. Category: **OBS St
 
 **Tag line:** Drive PTZ cameras from a game controller, in an OBS dock
 
-**Version:** 1.1.0
+**Version:** 1.2.0
 
 **Supported platforms:** macOS on Apple silicon as a compiled plugin; Windows, Linux and Intel Macs through the included OBS script
 
@@ -16,7 +16,7 @@ For https://obsproject.com/forum/resources/ → Add resource. Category: **OBS St
 
 **Licence:** GPL-2.0-or-later
 
-**Download:** choose "external download URL" and give https://github.com/lilPZmods/obs-ptz-field-controller/releases/latest (or upload `dist/ptz-field-controller-1.1.0-macos-arm64.zip`)
+**Download:** choose "external download URL" and give https://github.com/lilPZmods/obs-ptz-field-controller/releases/latest
 
 **Screenshots:** `packaging/screenshots/controller.png`, `packaging/screenshots/settings.png`
 
@@ -39,17 +39,17 @@ The right stick pans and tilts, the left stick zooms, and speed follows how far 
 
 **Requirements**
 
-- Python 3.9 or later (no extra packages)
+- macOS on Apple silicon, OBS 32. Nothing else to install
 - Cameras that accept VISCA over IP on UDP. Developed with Sony SRG cameras
 - A controller with the standard layout (Xbox, PlayStation and most others)
 
 **Install (macOS, Apple silicon)**
 
-1. Quit OBS and copy `ptz-field-controller.plugin` into `~/Library/Application Support/obs-studio/plugins/`.
-2. Open OBS and tick Docks → PTZ Field Controller.
-3. In the dock, press the gear, enter your cameras' IP addresses and save.
+1. Download the `.pkg` and double-click it. (It is not signed with an Apple certificate: right-click → Open the first time.)
+2. Open OBS. The controller appears as a panel; drag it into the window to dock it.
+3. Press the gear, enter your cameras' IP addresses and save.
 4. Press any button on the controller to wake it.
 
-**Install (other platforms)**: add `ptz_field_controller.py` under Tools → Scripts, then a custom browser dock at `http://127.0.0.1:8765/?obs=1`.
+**Other platforms**: the script download has an OBS Python script that does the same job; its README has the steps.
 
 Full instructions are in the README inside the download.
