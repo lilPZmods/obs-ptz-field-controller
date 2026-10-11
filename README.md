@@ -24,6 +24,7 @@ The gear button opens settings.
 - **Dark mode** is on by default. The switch here, or the sun/moon button in the top bar, changes it. The choice is remembered per browser.
 - **Cameras**: each camera's name, IP address and VISCA port (52381 on Sony cameras), the button and key that select it, and an optional stream address. **Save settings** writes the list to `config.json` on this computer and starts using it straight away, for every computer that has the controller open.
 - **Add camera** adds another and asks which controller button should select it. The spare buttons are the stick clicks, Start, Back, the two bumpers and D-pad left/right. When they are all taken the prompt says so and the camera is selected from the keyboard instead: number keys 1–9 are given out automatically, and any other free key can be pressed to set it.
+- **Remote access**: the password other computers sign in with. One is made up when the controller is first set up; it is shown here and can be changed to your own. Changing it signs out every other computer.
 - **VDO.Ninja**: the room's address, name, feed name and passwords. They are made up the first time the bridge runs; change them only to use a room you already have. **New room** makes fresh ones.
 - The stick dead zone and move-engagement threshold are saved per browser, as before.
 

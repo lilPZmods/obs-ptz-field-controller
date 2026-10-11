@@ -554,6 +554,35 @@ class BridgeTests(unittest.TestCase):
         self.assertEqual(self.send(self.command("brightness_up"), headers={"Cookie": cookie}), 200)
         self.assertIn((0x0100, 1, "8101040d02ff"), self.camera.packets())
 
+    def test_password_is_shown_in_settings_and_can_be_changed(self):
+        Handler.trust_this_computer = False
+        self.addCleanup(setattr, Handler, "password", "correct-horse")
+        old = self.send({"password": "correct-horse"}, "/api/login", want_response=True).headers["Set-Cookie"].split(";")[0]
+        request = Request(f"{self.base_url}/api/session", headers={"Cookie": old})
+        with urlopen(request, timeout=2) as response:
+            self.assertEqual(json.loads(response.read())["remote"]["password"], "correct-horse")
+
+        with tempfile.TemporaryDirectory() as folder, mock.patch.object(server, "CONFIG_PATH", Path(folder) / "config.json"):
+            Handler.config = {"port": 8765, "password": "correct-horse"}
+            for bad in ("short", " padded pass ", 123456, ""):
+                self.assertEqual(self.send({"v": 8, "password": bad}, "/api/password", headers={"Cookie": old}), 400)
+            changed = self.send({"v": 8, "password": "battery-staple"}, "/api/password", headers={"Cookie": old}, want_response=True)
+            self.assertEqual(changed.status, 200)
+            self.assertEqual(json.loads(server.CONFIG_PATH.read_text())["password"], "battery-staple")
+        new = changed.headers["Set-Cookie"].split(";")[0]
+        # The browser that made the change stays signed in; the old pass and the old password stop working.
+        self.assertEqual(self.drive(pan=0), 401)
+        self.assertEqual(self.send({"v": 8}, "/api/streams", headers={"Cookie": new}), 200)
+        self.assertEqual(self.send({"v": 8}, "/api/streams", headers={"Cookie": old}), 401)
+        self.assertEqual(self.send({"password": "correct-horse"}, "/api/login"), 401)
+        self.assertEqual(self.send({"password": "battery-staple"}, "/api/login"), 200)
+
+    def test_password_cannot_be_read_without_signing_in(self):
+        Handler.trust_this_computer = False
+        with self.assertRaises(Exception) as refused:
+            urlopen(f"{self.base_url}/api/session", timeout=2)
+        self.assertEqual(refused.exception.code, 401)
+
     def test_repeated_wrong_passwords_lock_out(self):
         Handler.trust_this_computer = False
         Handler.failed_logins["127.0.0.1"] = [time.monotonic()] * 8

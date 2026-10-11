@@ -211,6 +211,25 @@ def send_invites(google, vdo, people):
         google_call(GMAIL_SEND, token=access, body={"raw": base64.urlsafe_b64encode(message.as_bytes()).decode()})
 
 
+def clean_password(password):
+    if not isinstance(password, str) or not 6 <= len(password) <= 64 or password != password.strip() or not password.isprintable():
+        raise ValueError("The remote password must be 6 to 64 characters, with no spaces at either end")
+    return password
+
+
+def own_addresses():
+    """This computer's addresses on the local network, for telling people where to open the controller."""
+    found = []
+    try:
+        # No packet is sent: asking which address would be used to reach the outside reveals the main one.
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
+            probe.connect(("192.0.2.1", 9))
+            found.append(probe.getsockname()[0])
+    except OSError:
+        pass
+    return [address for address in found if not address.startswith("127.")]
+
+
 def find_ffmpeg(configured=""):
     """Where ffmpeg is: the path in config.json, the bin folder beside the bridge, or wherever the system keeps it."""
     candidates = [configured, ROOT / "bin" / "ffmpeg", ROOT / "bin" / "ffmpeg.exe", shutil.which("ffmpeg"), "/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg"]
@@ -789,6 +808,9 @@ class Handler(BaseHTTPRequestHandler):
     def _session_token(self):
         return hmac.new(self.secret.encode(), self.password.encode(), hashlib.sha256).hexdigest()
 
+    def _session_cookie(self):
+        return f"{SESSION_COOKIE}={self._session_token()}; Max-Age={SESSION_SECONDS}; Path=/; HttpOnly; SameSite=Strict"
+
     def _signed_in(self):
         if self.trust_this_computer and self.client_address[0] in {"127.0.0.1", "::1"}:
             return True
@@ -824,8 +846,7 @@ class Handler(BaseHTTPRequestHandler):
             self._json(401, {"error": "Wrong password"})
             return
 
-        cookie = f"{SESSION_COOKIE}={self._session_token()}; Max-Age={SESSION_SECONDS}; Path=/; HttpOnly; SameSite=Strict"
-        self._json(200, {"ok": True}, headers=[("Set-Cookie", cookie)])
+        self._json(200, {"ok": True}, headers=[("Set-Cookie", self._session_cookie())])
 
     def do_GET(self):
         if self.path == "/api/health":
@@ -886,7 +907,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         routes = {"/api/command": self._command, "/api/drive": self._drive, "/api/cameras": self._save_cameras,
-                  "/api/streams": self._look_for_streams, "/api/vdo": self._save_vdo, "/api/google": self._save_google,
+                  "/api/streams": self._look_for_streams, "/api/vdo": self._save_vdo, "/api/password": self._save_password, "/api/google": self._save_google,
                   "/api/google/signout": self._google_sign_out, "/api/invite": self._invite}
         route = routes.get(self.path)
         if route is None and self.path != "/api/login":
@@ -909,7 +930,8 @@ class Handler(BaseHTTPRequestHandler):
             if route is None:
                 self._login(data)
                 return
-            self._json(200, route(data))
+            result = route(data)
+            self._json(200, result, headers=result.pop("_headers", ()))
         except (ValueError, TypeError, json.JSONDecodeError) as error:
             self._json(400, {"error": str(error)})
         except Exception as error:
@@ -946,8 +968,12 @@ class Handler(BaseHTTPRequestHandler):
         return {"ok": True, "cameras": self._camera_list()}
 
     def _room(self):
-        """The VDO.Ninja room, its links, and whether invites can be emailed. Google's secret and sign-in never leave the bridge."""
-        return {"vdo": self.vdo, "links": vdo_links(self.vdo) if self.vdo else {},
+        """What the settings page shows besides cameras: the remote password, the VDO.Ninja room and its links, and
+        whether invites can be emailed. Google's secret and sign-in never leave the bridge."""
+        listening = self.server.server_address[0]
+        return {"remote": {"password": self.password, "port": self.server.server_port, "on": listening not in {"127.0.0.1", "::1", "localhost"},
+                           "addresses": own_addresses()},
+                "vdo": self.vdo, "links": vdo_links(self.vdo) if self.vdo else {},
                 "mail": {"address": self.google["email"], "ready": bool(self.google["refreshToken"]), "clientId": self.google["clientId"],
                          "clientReady": bool(self.google["clientId"] and self.google["clientSecret"])}}
 
@@ -956,6 +982,13 @@ class Handler(BaseHTTPRequestHandler):
         if self.config is not None:
             type(self).config = {**self.config, name: value}
             save_config(self.config)
+
+    def _save_password(self, data):
+        """Change the password other computers sign in with. Everyone signed in with the old one is signed out,
+        except the browser making the change, which is handed a pass for the new one."""
+        self._check_version(data)
+        self._keep("password", clean_password(data.get("password")))
+        return {"ok": True, **self._room(), "_headers": [("Set-Cookie", self._session_cookie())]}
 
     def _save_vdo(self, data):
         self._check_version(data)

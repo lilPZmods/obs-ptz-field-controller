@@ -64,6 +64,8 @@ let streamRetries = 0;
 // The VDO.Ninja room the bridge keeps: address, room, feed name, passwords and the crew to invite.
 let vdo = null;
 let vdoLinkSet = {};
+// How other computers reach the controller: the password, the port and this computer's network addresses.
+let remote = { password: "", port: 8765, on: false, addresses: [] };
 // The Google account invites go out from: its address, whether it is signed in, and whether an OAuth client is set.
 let mail = { address: "", ready: false, clientId: "", clientReady: false };
 // The stream address that last broke off in the viewer. It is not loaded again until refresh is pressed.
@@ -284,6 +286,11 @@ function lookForStreams(announce = true) {
 function adoptRoom(room) {
   vdo = room.vdo;
   vdoLinkSet = room.links;
+  remote = room.remote;
+  byId("remotePassword").value = remote.password;
+  byId("remoteHelp").textContent = !remote.on
+    ? "Remote access is switched off for this controller (host is 127.0.0.1 in config.json)."
+    : `From another computer, open http://${remote.addresses[0] ?? "<this computer's address>"}:${remote.port} and enter this password. A browser on this computer needs none.`;
   mail = room.mail;
   for (const field of ["base", "room", "feed", "password", "codirector"]) byId(`vdo_${field}`).value = vdo[field];
   byId("googleClientId").value = mail.clientId;
@@ -555,6 +562,13 @@ async function saveSettings() {
   }
   try {
     await saveGoogleClient();
+    const password = byId("remotePassword").value;
+    if (vdo && password !== remote.password) {
+      const response = await postJson("/api/password", { password });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error || `Controller bridge returned ${response.status}`);
+      adoptRoom(result);
+    }
   } catch (error) {
     setToast(error.message, true);
     return;

@@ -6,7 +6,7 @@ For https://obsproject.com/forum/resources/ → Add resource. Category: **OBS St
 
 **Tag line:** Drive PTZ cameras from a game controller, in an OBS dock
 
-**Version:** 1.2.0
+**Version:** 1.2.1
 
 **Supported platforms:** macOS on Apple silicon as a compiled plugin; Windows, Linux and Intel Macs through the included OBS script
 
