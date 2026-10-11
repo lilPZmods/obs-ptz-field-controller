@@ -67,7 +67,7 @@ let vdoLinkSet = {};
 // How other computers reach the controller: the password, the port and this computer's network addresses.
 let remote = { password: "", port: 8765, on: false, addresses: [] };
 // The bridge's video relay: OBS's output and cameras' RTSP streams, passed on over WebRTC without re-encoding.
-let relay = { running: false, port: 0, key: "" };
+let relay = { running: false, port: 0, key: "", outside: false, outsideAddress: "", outsideNote: "" };
 // Hangs up on whatever the camera viewer is playing over WebRTC.
 let stopWatching = null;
 // The Google account invites go out from: its address, whether it is signed in, and whether an OAuth client is set.
@@ -348,6 +348,10 @@ function adoptRoom(room) {
   remote = room.remote;
   relay = room.relay;
   document.documentElement.classList.toggle("has-relay", relay.running);
+  byId("outsideInput").checked = relay.outside;
+  byId("outsideHelp").textContent = relay.outside
+    ? `${relay.outsideNote}.${relay.outsideAddress ? ` This network's outside address is ${relay.outsideAddress}.` : ""}`
+    : "Off: the video can only be watched on this network. Switching it on asks the router to let viewers in from the internet; they still need a link with the view key.";
   byId("remotePassword").value = remote.password;
   byId("remoteHelp").textContent = !remote.on
     ? "Remote access is switched off for this controller (host is 127.0.0.1 in config.json)."
@@ -856,6 +860,18 @@ function initialize() {
   byId("lookForStreams").addEventListener("click", () => lookForStreams());
   byId("refreshStream").addEventListener("click", () => lookForStreams());
   byId("refreshStreams").addEventListener("click", () => lookForStreams());
+  byId("outsideInput").addEventListener("change", (event) => {
+    setToast(event.target.checked ? "Asking the router…" : "Closing the way in…");
+    postJson("/api/outside", { outside: event.target.checked }).then(async (response) => {
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error || `Controller bridge returned ${response.status}`);
+      adoptRoom(result);
+      setToast(result.relay.outside ? "Viewers outside this network can now watch" : "Outside viewing is off");
+    }).catch((error) => {
+      setToast(error.message, true);
+      refreshSession();
+    });
+  });
   byId("googleSignIn").addEventListener("click", googleSignIn);
   byId("googleSignOut").addEventListener("click", () => {
     postJson("/api/google/signout", {}).then((response) => response.json()).then((result) => {

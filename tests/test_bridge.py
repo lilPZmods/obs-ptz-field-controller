@@ -497,6 +497,7 @@ class BridgeTests(unittest.TestCase):
         self.assertEqual((first["webrtcPort"], first["udpPort"], first["hosts"]), (8889, 8189, []))
         self.assertNotEqual(first["viewKey"], second["viewKey"])
         self.assertEqual(server.clean_relay(first), first)
+        self.assertFalse(first["outside"])
         for bad in ({"webrtcPort": 0}, {"hosts": ["not a host!"]}, {"viewKey": "has spaces"}):
             with self.assertRaises(ValueError):
                 server.clean_relay(bad)
@@ -514,7 +515,8 @@ class BridgeTests(unittest.TestCase):
 
     def test_a_camera_rtsp_stream_goes_through_the_relay_without_ffmpeg(self):
         shown = []
-        relay = mock.Mock(running=True, settings=server.clean_relay({"viewKey": "abcd1234"}), show_cameras=lambda streams: shown.append(dict(streams)))
+        relay = mock.Mock(running=True, settings=server.clean_relay({"viewKey": "abcd1234"}), router=server.PortForwarder(),
+                          show_cameras=lambda streams: shown.append(dict(streams)))
         port = self.rtsp_camera()
         with mock.patch.object(Handler, "relay", relay), mock.patch.object(Handler, "ffmpeg", None), \
                 mock.patch.object(server, "STREAM_HTTP_PORTS", ()), mock.patch.object(server, "STREAM_RTSP_PORTS", (port,)):
@@ -526,7 +528,7 @@ class BridgeTests(unittest.TestCase):
         self.assertEqual((stream["state"], stream["kind"], stream["playable"], stream["webrtc"]), ("found", "rtsp", True, True))
         self.assertNotIn("note", stream)
         self.assertEqual(shown[-1], {0: f"rtsp://127.0.0.1:{port}/video1"})
-        self.assertEqual(told, {"running": True, "port": 8889, "key": "abcd1234"})
+        self.assertEqual((told["running"], told["port"], told["key"], told["outside"]), (True, 8889, "abcd1234", False))
 
     def test_feed_page_needs_the_view_key_from_other_computers(self):
         relay = mock.Mock(running=True, settings=server.clean_relay({"viewKey": "abcd1234"}))
@@ -545,6 +547,69 @@ class BridgeTests(unittest.TestCase):
         with self.assertRaises(Exception) as missing:
             urlopen(f"{self.base_url}/feed", timeout=2)
         self.assertEqual(missing.exception.code, 404)
+
+    def fake_router(self, refuse=False):
+        """A stand-in router: describes itself as UPnP gateways do and records what it is asked."""
+        asked = []
+
+        class Router(BaseHTTPRequestHandler):
+            def do_GET(self):
+                body = (b"<root><device><serviceList><service><serviceType>urn:schemas-upnp-org:service:WANIPConnection:1</serviceType>"
+                        b"<serviceId>x</serviceId><SCPDURL>/scpd</SCPDURL><controlURL>/control</controlURL></service></serviceList></device></root>")
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write(body)
+
+            def do_POST(self):
+                text = self.rfile.read(int(self.headers["Content-Length"])).decode()
+                action = self.headers["SOAPAction"].strip('"').split("#")[1]
+                asked.append((action, dict(server.re.findall(r"<(New\w+)>([^<]*)</", text))))
+                if refuse and action == "AddPortMapping":
+                    self.send_response(500)
+                    self.end_headers()
+                    self.wfile.write(b"<errorCode>718</errorCode><errorDescription>ConflictInMappingEntry</errorDescription>")
+                    return
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write(b"<NewExternalIPAddress>203.0.113.9</NewExternalIPAddress>")
+
+            def log_message(self, _format, *_args):
+                return
+
+        router = ThreadingHTTPServer(("127.0.0.1", 0), Router)
+        threading.Thread(target=router.serve_forever, daemon=True).start()
+        self.addCleanup(router.server_close)
+        self.addCleanup(router.shutdown)
+        patcher = mock.patch.object(server, "find_gateway", lambda: f"http://127.0.0.1:{router.server_port}/gate.xml")
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        return asked
+
+    def test_outside_viewing_asks_the_router_and_closes_up_again(self):
+        asked = self.fake_router()
+        with tempfile.TemporaryDirectory() as folder:
+            relay = server.MediaRelay(server.clean_relay({"viewKey": "abcd1234"}), program="/usr/bin/true", folder=folder)
+            self.assertFalse(relay.settings["outside"])
+            relay.process = mock.Mock(poll=lambda: None)
+            relay.let_outside_in(True)
+            opened = [(action, fields["NewProtocol"], fields["NewExternalPort"], fields["NewInternalClient"]) for action, fields in asked if action == "AddPortMapping"]
+            self.assertEqual(opened, [("AddPortMapping", "TCP", "8889", "127.0.0.1"), ("AddPortMapping", "UDP", "8189", "127.0.0.1")])
+            self.assertEqual(relay.router.outside, "203.0.113.9")
+            self.assertEqual(json.loads((Path(folder) / "relay.yml").read_text())["webrtcAdditionalHosts"], ["203.0.113.9"])
+            relay.let_outside_in(False)
+            closed = [(fields["NewProtocol"], fields["NewExternalPort"]) for action, fields in asked if action == "DeletePortMapping"]
+            self.assertEqual(closed, [("TCP", "8889"), ("UDP", "8189")])
+            self.assertEqual(json.loads((Path(folder) / "relay.yml").read_text())["webrtcAdditionalHosts"], [])
+            relay.process = None
+
+    def test_a_router_that_refuses_is_reported_not_hidden(self):
+        self.fake_router(refuse=True)
+        relay = mock.Mock(running=True, settings=server.clean_relay({"viewKey": "abcd1234"}), router=server.PortForwarder())
+        relay.let_outside_in = lambda wanted: relay.router.open([("TCP", 8889)])
+        with mock.patch.object(Handler, "relay", relay):
+            response = self.send({"v": 8, "outside": True}, "/api/outside", want_response=True)
+            self.assertEqual(response.code, 502)
+            self.assertIn("ConflictInMappingEntry", json.loads(response.read())["error"])
 
     def test_cameras_are_only_looked_at_when_asked(self):
         looked = []

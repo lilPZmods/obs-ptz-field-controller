@@ -42,12 +42,13 @@ The controller looks at the cameras for a stream only when asked: once when the 
 
 The bridge runs a relay of its own beside it. Whatever is published to the relay is handed to viewers over WebRTC packet for packet: nothing is decoded or encoded on the way, so it adds next to no delay or load, and no outside service is involved. The relay engine is MediaMTX (MIT licence), kept in `bin/mediamtx`; viewers connect with WHEP, the standard way to watch a WebRTC stream, so nothing else is tied to it.
 
-- **Send OBS's picture to it**: OBS → Settings → Stream → Service **WHIP**, Server `http://127.0.0.1:8889/program/whip`, no token. OBS encodes once, as it does for any stream. Only this computer may publish.
+- **OBS's picture gets there by itself**: the plugin runs a small output of its own that sends the program picture and sound to the relay whenever OBS is open. OBS's stream and recording are untouched, so you can stream to YouTube at the same time. Switch it off or on under Tools → **PTZ Field: send program video to the relay**. Only this computer may publish to the relay.
+- **Why the plugin encodes once**: WebRTC can only carry H.264 without B-frames and Opus sound, and OBS's own stream is normally neither (and exists only while streaming). So the plugin uses the Mac's hardware encoder at 720p, 3 Mbit/s, which costs next to nothing. The relay itself never encodes.
 - **Watch it**: **Switcher feed → From OBS, direct** on the main page, in a popup box, a new window, or on another device (QR code and link). The link is `http://<this computer>:8765/feed?key=…`; paste it into the PTZ Field app as the picture behind the sticks.
 - **Cameras**: a camera whose stream is RTSP is passed through the relay too and plays in the viewer as WebRTC, with no ffmpeg involved. It is fetched only while someone is watching.
-- **From outside your network**: forward TCP 8889 and UDP 8189 to this computer and list its public name under `relay.hosts` in `config.json`. Watching from another computer needs the view key, which is part of the link.
+- **From outside your network**: switch on **Let viewers outside this network watch the video** in settings. The bridge asks the router (by UPnP) to pass TCP 8889 and UDP 8189 in to this computer, and closes them again when it is switched off. Settings shows what the router said. If the router has UPnP turned off, forward those two ports by hand. Watching from another computer needs the view key, which is part of the link.
 
-OBS has one stream output, so pointing it at the relay means it is not also streaming elsewhere. Sound needs Opus audio, which is what OBS sends over WHIP; a source that sends AAC (RTMP, most cameras) is passed on as picture only.
+Sound needs Opus audio, which is what the plugin sends; a source that sends AAC (most cameras) is passed on as picture only.
 
 ## Switcher feed and crew (VDO.Ninja)
 
