@@ -466,6 +466,86 @@ class BridgeTests(unittest.TestCase):
         self.assertEqual((stream["state"], stream["kind"], stream["playable"]), ("found", "rtsp", False))
         self.assertIn("ffmpeg", stream["note"])
 
+    # The video relay (WebRTC without re-encoding)
+
+    def rtsp_camera(self):
+        """A socket that answers RTSP DESCRIBE the way a camera with a stream does."""
+        rtsp = socket.socket()
+        rtsp.bind(("127.0.0.1", 0))
+        rtsp.listen()
+        self.addCleanup(rtsp.close)
+
+        def answer():
+            while True:
+                try:
+                    link, _ = rtsp.accept()
+                except OSError:
+                    return
+                link.settimeout(1)
+                try:
+                    if link.recv(512).startswith(b"DESCRIBE"):
+                        link.sendall(b"RTSP/1.0 200 OK\r\nCSeq: 1\r\n\r\n")
+                except OSError:
+                    pass
+                link.close()
+
+        threading.Thread(target=answer, daemon=True).start()
+        return rtsp.getsockname()[1]
+
+    def test_relay_settings_get_a_view_key_and_refuse_nonsense(self):
+        first, second = server.clean_relay(None), server.clean_relay({})
+        self.assertEqual((first["webrtcPort"], first["udpPort"], first["hosts"]), (8889, 8189, []))
+        self.assertNotEqual(first["viewKey"], second["viewKey"])
+        self.assertEqual(server.clean_relay(first), first)
+        for bad in ({"webrtcPort": 0}, {"hosts": ["not a host!"]}, {"viewKey": "has spaces"}):
+            with self.assertRaises(ValueError):
+                server.clean_relay(bad)
+
+    def test_relay_only_takes_video_from_this_computer_and_viewers_need_the_key(self):
+        with tempfile.TemporaryDirectory() as folder:
+            relay = server.MediaRelay(server.clean_relay({"viewKey": "abcd1234", "hosts": ["studio.example.com"]}), program="/usr/bin/true", folder=folder)
+            relay.show_cameras({1: "rtsp://192.0.2.5:554/video1"})
+            written = json.loads((Path(folder) / "relay.yml").read_text())
+        everyone, viewer = written["authInternalUsers"]
+        self.assertEqual((everyone["ips"], [entry["action"] for entry in everyone["permissions"]]), (["127.0.0.1", "::1"], ["publish", "read"]))
+        self.assertEqual((viewer["user"], viewer["pass"], [entry["action"] for entry in viewer["permissions"]]), ("viewer", "abcd1234", ["read"]))
+        self.assertEqual(written["paths"], {"program": {}, "camera2": {"source": "rtsp://192.0.2.5:554/video1", "sourceOnDemand": True, "rtspTransport": "tcp"}})
+        self.assertEqual((written["webrtcAdditionalHosts"], written["rtspAddress"], written["rtmpAddress"]), (["studio.example.com"], "127.0.0.1:8554", "127.0.0.1:1935"))
+
+    def test_a_camera_rtsp_stream_goes_through_the_relay_without_ffmpeg(self):
+        shown = []
+        relay = mock.Mock(running=True, settings=server.clean_relay({"viewKey": "abcd1234"}), show_cameras=lambda streams: shown.append(dict(streams)))
+        port = self.rtsp_camera()
+        with mock.patch.object(Handler, "relay", relay), mock.patch.object(Handler, "ffmpeg", None), \
+                mock.patch.object(server, "STREAM_HTTP_PORTS", ()), mock.patch.object(server, "STREAM_RTSP_PORTS", (port,)):
+            self.use_cameras([{"name": "PTZ1", "host": "127.0.0.1", "port": self.camera.port}])
+            deadline = time.monotonic() + 3
+            while (stream := self.session()["cameras"][0]["stream"])["state"] == "looking" and time.monotonic() < deadline:
+                time.sleep(0.05)
+            told = self.session()["relay"]
+        self.assertEqual((stream["state"], stream["kind"], stream["playable"], stream["webrtc"]), ("found", "rtsp", True, True))
+        self.assertNotIn("note", stream)
+        self.assertEqual(shown[-1], {0: f"rtsp://127.0.0.1:{port}/video1"})
+        self.assertEqual(told, {"running": True, "port": 8889, "key": "abcd1234"})
+
+    def test_feed_page_needs_the_view_key_from_other_computers(self):
+        relay = mock.Mock(running=True, settings=server.clean_relay({"viewKey": "abcd1234"}))
+        with mock.patch.object(Handler, "relay", relay):
+            with urlopen(f"{self.base_url}/feed", timeout=2) as response:
+                self.assertIn(b"/whep", response.read())
+            Handler.trust_this_computer = False
+            for address, wanted in (("/feed", 401), ("/feed?key=wrong", 401), ("/feed?key=abcd1234", 200)):
+                try:
+                    with urlopen(f"{self.base_url}{address}", timeout=2) as response:
+                        status = response.status
+                except Exception as error:
+                    status = error.code
+                self.assertEqual(status, wanted, address)
+        Handler.trust_this_computer = True
+        with self.assertRaises(Exception) as missing:
+            urlopen(f"{self.base_url}/feed", timeout=2)
+        self.assertEqual(missing.exception.code, 404)
+
     def test_cameras_are_only_looked_at_when_asked(self):
         looked = []
         with mock.patch.object(server.StreamFinder, "_find", lambda _finder, camera: looked.append(camera["name"]) or {"state": "none", "note": "nothing"}):

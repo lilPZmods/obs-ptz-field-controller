@@ -37,9 +37,14 @@
               <div class="menu-anchor">
                 <button class="quiet-button strong" id="feedButton" type="button" aria-haspopup="true">SWITCHER FEED</button>
                 <div class="menu" id="feedMenu" hidden>
-                  <button type="button" id="feedInBox" class="not-in-obs">POPUP BOX</button>
-                  <button type="button" id="feedInWindow" class="not-in-obs">NEW WINDOW</button>
-                  <button type="button" id="feedOnDevice">ANOTHER DEVICE</button>
+                  <span class="menu-heading needs-relay">FROM OBS, DIRECT</span>
+                  <button type="button" data-feed="relay" data-where="box" class="not-in-obs needs-relay">POPUP BOX</button>
+                  <button type="button" data-feed="relay" data-where="window" class="not-in-obs needs-relay">NEW WINDOW</button>
+                  <button type="button" data-feed="relay" data-where="device" class="needs-relay">ANOTHER DEVICE</button>
+                  <span class="menu-heading">VDO.NINJA</span>
+                  <button type="button" data-feed="vdo" data-where="box" class="not-in-obs">POPUP BOX</button>
+                  <button type="button" data-feed="vdo" data-where="window" class="not-in-obs">NEW WINDOW</button>
+                  <button type="button" data-feed="vdo" data-where="device">ANOTHER DEVICE</button>
                 </div>
               </div>
               <button class="quiet-button strong" id="inviteButton" type="button">INVITE COLLABORATORS</button>
@@ -53,6 +58,7 @@
 
         <figure class="viewer" id="viewer" hidden>
           <img id="viewerImage" alt="" />
+          <video id="viewerVideo" autoplay playsinline muted hidden></video>
           <figcaption><span class="live-dot"></span><span id="viewerCaption"></span></figcaption>
         </figure>
         <p class="stream-pill" id="streamPill" role="alert" hidden><span class="pill-dot"></span><span id="streamPillText"></span><button id="refreshStream" type="button">REFRESH</button></p>
@@ -159,7 +165,7 @@
         <div class="assign-card">
           <p class="eyebrow">ANOTHER DEVICE</p>
           <h3 id="deviceTitle">Watch the switcher feed</h3>
-          <p class="assign-text">Point the iPad's or phone's camera at the code, or open the link on it. It shows the director's picture and sound only.</p>
+          <p class="assign-text">Point the iPad's or phone's camera at the code, or open the link on it. It shows the picture and sound only. In the PTZ Field app, paste the link into Settings as the picture behind the sticks.</p>
           <div class="qr" id="deviceQr"></div>
           <input class="link-field" id="deviceLink" readonly aria-label="Feed link" />
           <div class="drawer-actions"><button class="quiet-button" id="deviceCopy" type="button">COPY LINK</button><button class="save-button" id="deviceDone" type="button">DONE</button></div>

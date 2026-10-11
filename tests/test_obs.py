@@ -58,7 +58,7 @@ class ObsScriptTests(unittest.TestCase):
         logged = []
         obs = types.SimpleNamespace(LOG_INFO=1, LOG_WARNING=2, script_log=lambda _level, message: logged.append(message))
         with tempfile.TemporaryDirectory() as folder, mock.patch.dict(sys.modules, {"obspython": obs}), \
-                mock.patch.object(server, "CONFIG_PATH", Path(folder) / "config.json"):
+                mock.patch.object(server, "CONFIG_PATH", Path(folder) / "config.json"), mock.patch.object(server, "find_program", lambda *_: None):
             server.CONFIG_PATH.write_text(json.dumps({"host": "127.0.0.1", "port": 0, "cameras": [{"name": "PTZ1"}]}))
             import ptz_field_controller as script
             script.script_load(None)

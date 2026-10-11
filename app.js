@@ -66,6 +66,10 @@ let vdo = null;
 let vdoLinkSet = {};
 // How other computers reach the controller: the password, the port and this computer's network addresses.
 let remote = { password: "", port: 8765, on: false, addresses: [] };
+// The bridge's video relay: OBS's output and cameras' RTSP streams, passed on over WebRTC without re-encoding.
+let relay = { running: false, port: 0, key: "" };
+// Hangs up on whatever the camera viewer is playing over WebRTC.
+let stopWatching = null;
 // The Google account invites go out from: its address, whether it is signed in, and whether an OAuth client is set.
 let mail = { address: "", ready: false, clientId: "", clientReady: false };
 // The stream address that last broke off in the viewer. It is not loaded again until refresh is pressed.
@@ -259,14 +263,26 @@ function updateCameraUI() {
 function updateViewer() {
   const camera = cameras[selectedCamera];
   const stream = camera?.stream ?? {};
-  const wanted = stream.playable ? `/api/stream/${selectedCamera}?stream=${stream.id}&try=${streamRetries}` : "";
+  // A camera's RTSP stream comes through the relay as WebRTC; Motion JPEG and stills come as a picture.
+  const direct = Boolean(stream.webrtc && relay.running);
+  const wanted = !stream.playable ? "" : direct ? `whep:camera${selectedCamera + 1}?stream=${stream.id}&try=${streamRetries}` : `/api/stream/${selectedCamera}?stream=${stream.id}&try=${streamRetries}`;
   const source = wanted === failedSource ? "" : wanted;
   const image = byId("viewerImage");
   if (image.dataset.source !== source) {
     image.dataset.source = source;
+    stopWatching?.();
+    stopWatching = null;
+    image.hidden = direct;
+    byId("viewerVideo").hidden = !direct || !source;
     // Changing or removing src makes the browser hang up on the stream it was showing.
-    if (source) image.src = source;
+    if (source && !direct) image.src = source;
     else image.removeAttribute("src");
+    if (source && direct) {
+      stopWatching = watchRelay(byId("viewerVideo"), `camera${selectedCamera + 1}`, () => {
+        failedSource = source;
+        updateViewer();
+      });
+    }
   }
   byId("viewer").hidden = !source;
   byId("viewerCaption").textContent = camera ? `${camera.name} · LIVE`.toUpperCase() : "";
@@ -274,6 +290,47 @@ function updateViewer() {
   const dropped = Boolean(camera) && (stream.state === "dropped" || (wanted !== "" && wanted === failedSource));
   byId("streamPill").hidden = !dropped;
   byId("streamPillText").textContent = dropped ? `${camera.name} STREAM DROPPED`.toUpperCase() : "";
+}
+
+// Plays one of the relay's streams in a video element with WHEP, the standard way to watch a WebRTC stream.
+// Returns a function that hangs up. `onLost` is called if the stream can't be had or breaks off.
+function watchRelay(video, path, onLost) {
+  const link = new RTCPeerConnection();
+  let over = false;
+  const lost = () => {
+    if (over) return;
+    over = true;
+    link.close();
+    onLost();
+  };
+  link.addTransceiver("video", { direction: "recvonly" });
+  link.addTransceiver("audio", { direction: "recvonly" });
+  link.ontrack = (event) => { video.srcObject = event.streams[0]; };
+  link.onconnectionstatechange = () => { if (["failed", "disconnected"].includes(link.connectionState)) lost(); };
+  (async () => {
+    await link.setLocalDescription(await link.createOffer());
+    const answer = await fetch(`${location.protocol}//${location.hostname}:${relay.port}/${path}/whep`, {
+      method: "POST",
+      headers: { "Content-Type": "application/sdp", Authorization: `Basic ${btoa(`viewer:${relay.key}`)}` },
+      body: link.localDescription.sdp,
+    });
+    if (!answer.ok) throw new Error(`The relay returned ${answer.status}`);
+    await link.setRemoteDescription({ type: "answer", sdp: await answer.text() });
+  })().catch(lost);
+  return () => {
+    over = true;
+    link.close();
+    video.srcObject = null;
+  };
+}
+
+// Where to watch the switcher feed: OBS's own output through the bridge's relay, or the VDO.Ninja room.
+// Another device needs this computer's network address, not "127.0.0.1".
+function feedLink(source, forAnotherDevice) {
+  if (source === "vdo") return vdoLinks().viewer;
+  const local = ["127.0.0.1", "localhost"].includes(location.hostname);
+  const host = forAnotherDevice && local ? remote.addresses[0] ?? location.hostname : location.hostname;
+  return `${location.protocol}//${host}:${location.port || remote.port}/feed?port=${relay.port}&key=${relay.key}`;
 }
 
 function lookForStreams(announce = true) {
@@ -289,6 +346,8 @@ function adoptRoom(room) {
   vdo = room.vdo;
   vdoLinkSet = room.links;
   remote = room.remote;
+  relay = room.relay;
+  document.documentElement.classList.toggle("has-relay", relay.running);
   byId("remotePassword").value = remote.password;
   byId("remoteHelp").textContent = !remote.on
     ? "Remote access is switched off for this controller (host is 127.0.0.1 in config.json)."
@@ -327,8 +386,8 @@ function copyText(text, what) {
   done();
 }
 
-function openFeedBox() {
-  byId("feedFrame").src = vdoLinks().viewer;
+function openFeedBox(link) {
+  byId("feedFrame").src = link;
   byId("feedBox").hidden = false;
 }
 
@@ -338,12 +397,11 @@ function closeFeedBox() {
   byId("feedFrame").removeAttribute("src");
 }
 
-function openFeedWindow() {
-  if (!window.open(vdoLinks().viewer, "ptz-switcher-feed", "popup,width=960,height=560")) setToast("The browser blocked the new window — allow pop-ups for this page", true);
+function openFeedWindow(link) {
+  if (!window.open(link, "ptz-switcher-feed", "popup,width=960,height=560")) setToast("The browser blocked the new window — allow pop-ups for this page", true);
 }
 
-function openDeviceDialog() {
-  const link = vdoLinks().viewer;
+function openDeviceDialog(link) {
   const code = qrcode(0, "M");
   code.addData(link);
   code.make();
@@ -820,18 +878,22 @@ function initialize() {
   const closeFeedMenu = () => { byId("feedMenu").hidden = true; };
   byId("feedButton").addEventListener("click", (event) => {
     event.stopPropagation();
-    if (!vdo) return;
-    if (inObs) openDeviceDialog();
-    else byId("feedMenu").hidden = !byId("feedMenu").hidden;
+    if (vdo) byId("feedMenu").hidden = !byId("feedMenu").hidden;
+  });
+  byId("feedMenu").addEventListener("click", (event) => {
+    const choice = event.target.closest("[data-feed]");
+    if (!choice) return;
+    const link = feedLink(choice.dataset.feed, choice.dataset.where === "device");
+    byId("feedBox").dataset.link = link;
+    if (choice.dataset.where === "box") openFeedBox(link);
+    else if (choice.dataset.where === "window") openFeedWindow(link);
+    else openDeviceDialog(link);
   });
   document.addEventListener("click", closeFeedMenu);
-  byId("feedInBox").addEventListener("click", openFeedBox);
-  byId("feedInWindow").addEventListener("click", openFeedWindow);
-  byId("feedOnDevice").addEventListener("click", openDeviceDialog);
   byId("feedClose").addEventListener("click", closeFeedBox);
   byId("feedPopOut").addEventListener("click", () => {
     closeFeedBox();
-    openFeedWindow();
+    openFeedWindow(byId("feedBox").dataset.link);
   });
   byId("feedBar").addEventListener("pointerdown", (event) => {
     if (event.target.closest("button")) return;

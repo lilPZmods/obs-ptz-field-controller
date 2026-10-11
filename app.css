@@ -128,7 +128,7 @@ button { color: inherit; }
 
 /* The selected camera's picture. Never taller than 38% of the window, so the controls stay in view below it. */
 .viewer { position: relative; margin: 0 0 17px; border: 1px solid var(--line-strong); background: #000; display: flex; justify-content: center; }
-.viewer img { display: block; width: min(100%, 38vh * 16 / 9); aspect-ratio: 16 / 9; object-fit: contain; }
+.viewer img, .viewer video { display: block; width: min(100%, 38vh * 16 / 9); aspect-ratio: 16 / 9; object-fit: contain; }
 .viewer figcaption { position: absolute; left: 10px; top: 10px; display: inline-flex; align-items: center; gap: 7px; padding: 4px 8px; background: #000000a6; color: #e3ece5; font: 9px var(--mono); letter-spacing: .6px; }
 .live-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--coral); }
 .stream-pill { width: fit-content; display: flex; align-items: center; gap: 8px; margin: -5px 0 14px; padding: 5px 6px 5px 11px; border: 1px solid var(--stop-line); border-radius: 999px; background: var(--stop-fill); color: var(--stop-ink); font: 9px var(--mono); letter-spacing: .5px; }
@@ -142,6 +142,9 @@ button { color: inherit; }
 .menu { position: absolute; z-index: 4; top: calc(100% + 4px); left: 0; min-width: 100%; display: grid; border: 1px solid var(--line-strong); background: var(--surface-solid); box-shadow: 0 12px 30px var(--shadow); }
 .menu button { padding: 10px 12px; border: 0; background: none; color: var(--ink); font: 9px var(--mono); letter-spacing: .4px; text-align: left; white-space: nowrap; cursor: pointer; }
 .menu button:hover { background: var(--hover); }
+.menu-heading { padding: 9px 12px 3px; color: var(--faint); font: 8px var(--mono); letter-spacing: .6px; }
+/* Hidden until the bridge reports its video relay is running. */
+:root:not(.has-relay) .needs-relay { display: none; }
 /* The feed is not shown in a box or window inside the OBS dock. */
 .in-obs .not-in-obs { display: none; }
 
