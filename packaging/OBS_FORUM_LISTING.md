@@ -6,7 +6,7 @@ For https://obsproject.com/forum/resources/ → Add resource. Category: **OBS St
 
 **Tag line:** Drive PTZ cameras from a game controller, in an OBS dock
 
-**Version:** 1.3.0
+**Version:** 1.4.0
 
 **Supported platforms:** macOS on Apple silicon as a compiled plugin; Windows, Linux and Intel Macs through the included OBS script
 
@@ -31,6 +31,7 @@ The right stick pans and tilts, the left stick zooms, and speed follows how far 
 - Smooth, proportional pan, tilt and zoom from the sticks, with a top-speed limit on the triggers
 - Any number of cameras; each is selected with a controller button or a keyboard key you choose
 - Shows the selected camera's video in the dock when the camera offers Motion JPEG or still pictures (RTSP with ffmpeg installed)
+- Built-in WebRTC video relay: OBS's output and cameras' RTSP streams reach a browser or tablet with no re-encoding and no outside service
 - Cameras stop by themselves if the dock closes or the connection drops
 - Dark and light themes
 - Also works in an ordinary browser, including from another computer with a password

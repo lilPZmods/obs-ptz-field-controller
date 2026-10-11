@@ -21,7 +21,7 @@ Drive PTZ cameras from a game controller, in a dock inside OBS Studio or in any 
 
 **macOS (Apple silicon)**
 
-1. Double-click `ptz-field-controller-1.3.0-macos-arm64.pkg` and click through the installer. It puts the plugin in your OBS plugins folder; there are no files to move and no password to enter.
+1. Double-click `ptz-field-controller-1.4.0-macos-arm64.pkg` and click through the installer. It puts the plugin in your OBS plugins folder; there are no files to move and no password to enter.
 2. Open OBS (quit and reopen it if it was running). The controller appears as its own panel the first time; drag it into the OBS window to dock it. Later it is under Docks → PTZ Field Controller.
 3. Press the gear in the panel, enter each camera's IP address, and save.
 4. Plug in the controller and press any button on it.
@@ -54,6 +54,10 @@ D-pad up/down make the picture brighter or dimmer; A/B change red gain and X/Y b
 ## Video
 
 The bridge looks for a stream on each camera when it starts, when a page opens and when you press Refresh: Motion JPEG and still pictures on ports 80 and 8080, then RTSP on 554 and 8554. Motion JPEG and stills show directly. RTSP needs `ffmpeg` installed on the same computer, because browsers cannot play it. If your camera's stream is somewhere unusual or needs a sign-in, enter its address in that camera's settings, for example `http://user:password@192.168.1.20/mjpeg`.
+
+## Video without a third party
+
+The plugin carries its own video relay. Point OBS at it (Settings → Stream → Service **WHIP**, Server `http://127.0.0.1:8889/program/whip`) and the picture is handed to viewers over WebRTC with no re-encoding and no outside service. Watch it from **Switcher feed → From OBS, direct**: in a box, a window, or on another device from a QR code. Cameras that offer RTSP are shown the same way.
 
 ## Crew invites
 

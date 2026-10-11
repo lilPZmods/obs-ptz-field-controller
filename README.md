@@ -38,6 +38,17 @@ The controller looks at the cameras for a stream only when asked: once when the 
 - RTSP (H.264) cannot be shown by a browser, so the controller converts it with `ffmpeg`. It looks for ffmpeg at the `ffmpeg` path in `config.json`, then `bin/ffmpeg` in this folder, then the usual system places.
 - If a camera's stream is somewhere unusual or needs a sign-in, enter it in that camera's stream address, e.g. `http://user:password@192.168.1.20/mjpeg` or `rtsp://192.168.1.20/video1`.
 
+## Video relay (WebRTC, no re-encoding)
+
+The bridge runs a relay of its own beside it. Whatever is published to the relay is handed to viewers over WebRTC packet for packet: nothing is decoded or encoded on the way, so it adds next to no delay or load, and no outside service is involved. The relay engine is MediaMTX (MIT licence), kept in `bin/mediamtx`; viewers connect with WHEP, the standard way to watch a WebRTC stream, so nothing else is tied to it.
+
+- **Send OBS's picture to it**: OBS → Settings → Stream → Service **WHIP**, Server `http://127.0.0.1:8889/program/whip`, no token. OBS encodes once, as it does for any stream. Only this computer may publish.
+- **Watch it**: **Switcher feed → From OBS, direct** on the main page, in a popup box, a new window, or on another device (QR code and link). The link is `http://<this computer>:8765/feed?key=…`; paste it into the PTZ Field app as the picture behind the sticks.
+- **Cameras**: a camera whose stream is RTSP is passed through the relay too and plays in the viewer as WebRTC, with no ffmpeg involved. It is fetched only while someone is watching.
+- **From outside your network**: forward TCP 8889 and UDP 8189 to this computer and list its public name under `relay.hosts` in `config.json`. Watching from another computer needs the view key, which is part of the link.
+
+OBS has one stream output, so pointing it at the relay means it is not also streaming elsewhere. Sound needs Opus audio, which is what OBS sends over WHIP; a source that sends AAC (RTMP, most cameras) is passed on as picture only.
+
 ## Switcher feed and crew (VDO.Ninja)
 
 VDO.Ninja has no accounts: a room exists as soon as its address is opened, so the controller makes up a room name, feed name and passwords and keeps them in `config.json`.

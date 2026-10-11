@@ -44,11 +44,17 @@ cp server.py index.html app.css app.js qrcode.js LICENSE "$OUT/Contents/Resource
 # Package the bridge as a program of its own, Python included, so the plugin needs nothing installed.
 # Needs PyInstaller in .venv (.venv/bin/python3 -m pip install pyinstaller); without it the plugin
 # is built to run server.py with the computer's Python instead.
+# The video relay (MediaMTX, MIT licence) rides along when it is in bin/; without it the plugin has no WebRTC video.
+RELAY=""
+if [ -x bin/mediamtx ]; then
+  RELAY="--add-binary $PWD/bin/mediamtx:bin"
+  cp .build/dl-mediamtx/LICENSE "$OUT/Contents/Resources/MEDIAMTX-LICENSE" 2>/dev/null || true
+fi
 if .venv/bin/python3 -m PyInstaller --version >/dev/null 2>&1; then
   .venv/bin/python3 -m PyInstaller --noconfirm --log-level WARN --onedir --name ptz-bridge \
     --distpath "$DEPS/frozen" --workpath "$DEPS/pyinstaller" --specpath "$DEPS" \
     --add-data "$PWD/index.html:." --add-data "$PWD/app.css:." --add-data "$PWD/app.js:." --add-data "$PWD/qrcode.js:." \
-    server.py
+    $RELAY server.py
   cp -R "$DEPS/frozen/ptz-bridge" "$OUT/Contents/Resources/ptz-bridge"
 else
   echo "PyInstaller not found: this build will need Python 3 on the computer it runs on."

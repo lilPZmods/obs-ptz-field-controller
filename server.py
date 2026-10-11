@@ -240,10 +240,159 @@ def own_addresses():
     return [address for address in found if not address.startswith("127.")]
 
 
-def find_ffmpeg(configured=""):
-    """Where ffmpeg is: the path in config.json, the bin folder beside the bridge, or wherever the system keeps it."""
-    candidates = [configured, ROOT / "bin" / "ffmpeg", ROOT / "bin" / "ffmpeg.exe", shutil.which("ffmpeg"), "/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg"]
+def find_program(name, configured=""):
+    """Where a helper program is: the path in config.json, the bin folder beside the bridge, or wherever the system keeps it."""
+    candidates = [configured, ROOT / "bin" / name, ROOT / "bin" / f"{name}.exe", shutil.which(name), f"/opt/homebrew/bin/{name}", f"/usr/local/bin/{name}"]
     return next((str(candidate) for candidate in candidates if candidate and os.access(candidate, os.X_OK)), None)
+
+
+def clean_relay(relay):
+    """Settings for the video relay. The view key is what a device that isn't signed in must show to watch."""
+    relay = relay if isinstance(relay, dict) else {}
+    def port(name, usual):
+        value = relay.get(name, usual)
+        if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 65535:
+            raise ValueError(f"relay {name} must be a port number")
+        return value
+    hosts = relay.get("hosts", [])
+    if not isinstance(hosts, list) or not all(isinstance(host, str) and re.fullmatch(r"[A-Za-z0-9.:-]{1,253}", host) for host in hosts):
+        raise ValueError("relay hosts must be a list of addresses")
+    key = str(relay.get("viewKey") or secrets.token_hex(8))
+    if not re.fullmatch(r"[A-Za-z0-9]{8,64}", key):
+        raise ValueError("The relay view key can only hold letters and numbers (8 or more)")
+    return {"webrtcPort": port("webrtcPort", 8889), "udpPort": port("udpPort", 8189), "rtspPort": port("rtspPort", 8554),
+            "rtmpPort": port("rtmpPort", 1935), "viewKey": key, "hosts": hosts}
+
+
+class MediaRelay:
+    """Hands video that is already encoded on to viewers over WebRTC, untouched.
+
+    The relay is MediaMTX, run as a helper beside the bridge. Whatever is published to it (OBS's own stream,
+    sent by WHIP, RTMP or RTSP) and whatever RTSP streams the cameras offer are passed to viewers packet for
+    packet, with nothing decoded or encoded on the way, so it adds next to no delay or load. Viewers connect
+    with WHEP, the standard way to watch a WebRTC stream, so the apps and pages are not tied to this relay.
+
+    Publishing is only accepted from this computer. Watching needs the view key, except from this computer.
+    """
+
+    PROGRAM = "program"
+
+    def __init__(self, settings, program=None, folder=None):
+        self.settings = settings
+        self.program = program
+        self.config_path = Path(folder or CONFIG_PATH.parent) / "relay.yml"
+        self.process = None
+        self.cameras = {}
+
+    @property
+    def running(self):
+        return self.process is not None and self.process.poll() is None
+
+    def start(self):
+        if not self.program:
+            return
+        self._write()
+        try:
+            # Run from the settings folder: the relay writes a certificate of its own beside where it is started.
+            self.process = subprocess.Popen([self.program, str(self.config_path)], cwd=self.config_path.parent,
+                                            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except OSError:
+            self.process = None
+
+    def stop(self):
+        if self.process is None:
+            return
+        self.process.terminate()
+        try:
+            self.process.wait(3)
+        except subprocess.TimeoutExpired:
+            self.process.kill()
+        self.process = None
+
+    def show_cameras(self, streams):
+        """Offer these cameras' RTSP streams (index: address) to viewers. The relay picks the change up by itself."""
+        if streams != self.cameras:
+            self.cameras = dict(streams)
+            if self.program:
+                self._write()
+
+    @staticmethod
+    def camera_path(index):
+        return f"camera{index + 1}"
+
+    def _write(self):
+        settings = self.settings
+        paths = {self.PROGRAM: {}}
+        for index, address in self.cameras.items():
+            # Fetched only while someone is watching, so an idle camera is left alone.
+            paths[self.camera_path(index)] = {"source": address, "sourceOnDemand": True, "rtspTransport": "tcp"}
+        config = {
+            "logLevel": "warn", "api": False, "metrics": False, "pprof": False, "playback": False, "hls": False, "srt": False,
+            "rtsp": True, "rtspAddress": f"127.0.0.1:{settings['rtspPort']}", "rtspTransports": ["tcp"],
+            "rtmp": True, "rtmpAddress": f"127.0.0.1:{settings['rtmpPort']}",
+            "webrtc": True, "webrtcAddress": f":{settings['webrtcPort']}", "webrtcLocalUDPAddress": f":{settings['udpPort']}",
+            "webrtcAdditionalHosts": settings["hosts"],
+            "authMethod": "internal",
+            "authInternalUsers": [
+                {"user": "any", "pass": "", "ips": ["127.0.0.1", "::1"], "permissions": [{"action": "publish"}, {"action": "read"}]},
+                {"user": "viewer", "pass": settings["viewKey"], "ips": [], "permissions": [{"action": "read"}]},
+            ],
+            "paths": paths,
+        }
+        # JSON is also valid YAML, which is what the relay reads.
+        partial = self.config_path.with_name(self.config_path.name + ".part")
+        partial.write_text(json.dumps(config, indent=2) + "\n")
+        os.chmod(partial, 0o600)
+        os.replace(partial, self.config_path)
+
+
+FEED_PAGE = b"""<!doctype html>
+<html lang="en"><head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<title>PTZ / Feed</title>
+<style>
+html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+video { width: 100%; height: 100%; object-fit: contain; background: #000; }
+p, button { position: fixed; font: 11px ui-monospace, Menlo, monospace; letter-spacing: .08em; color: #e3ece5; }
+p { left: 0; right: 0; top: 46%; margin: 0; text-align: center; opacity: .55; }
+button { right: 14px; bottom: 14px; padding: 9px 12px; border: 0; border-radius: 999px; background: #000000a6; }
+[hidden] { display: none; }
+</style></head><body>
+<video id="video" autoplay playsinline muted></video><p id="note">WAITING FOR VIDEO</p><button id="sound" hidden>TAP FOR SOUND</button>
+<script>
+// Plays one of the relay's streams with WHEP, the standard way to watch a WebRTC stream, and keeps trying while there is none.
+const query = new URLSearchParams(location.search);
+const relay = `${location.protocol}//${location.hostname}:${query.get("port") || 8889}/${query.get("path") || "program"}/whep`;
+const headers = { "Content-Type": "application/sdp" };
+if (query.get("key")) headers.Authorization = "Basic " + btoa("viewer:" + query.get("key"));
+const video = document.getElementById("video"), note = document.getElementById("note"), sound = document.getElementById("sound");
+let link = null;
+
+async function watch() {
+  if (link) link.close();
+  const made = link = new RTCPeerConnection();
+  made.addTransceiver("video", { direction: "recvonly" });
+  made.addTransceiver("audio", { direction: "recvonly" });
+  made.ontrack = (event) => { video.srcObject = event.streams[0]; };
+  made.onconnectionstatechange = () => { if (["failed", "disconnected", "closed"].includes(made.connectionState) && link === made) retry(); };
+  try {
+    await made.setLocalDescription(await made.createOffer());
+    const answer = await fetch(relay, { method: "POST", headers, body: made.localDescription.sdp });
+    if (!answer.ok) throw new Error(answer.status === 401 ? "THE VIEW KEY IN THIS LINK IS NOT RIGHT" : "WAITING FOR VIDEO");
+    await made.setRemoteDescription({ type: "answer", sdp: await answer.text() });
+  } catch (error) {
+    note.textContent = error.message.toUpperCase() === error.message ? error.message : "WAITING FOR VIDEO";
+    if (link === made) retry();
+  }
+}
+function retry() { note.hidden = false; setTimeout(watch, 2000); }
+video.addEventListener("playing", () => { note.hidden = true; sound.hidden = !video.muted; });
+sound.addEventListener("click", () => { video.muted = false; sound.hidden = true; });
+watch();
+</script></body></html>"""
+
+
+def find_ffmpeg(configured=""):
+    return find_program("ffmpeg", configured)
 
 # Sony cameras send their VISCA replies to this port on the sender, whatever port the command came from.
 VISCA_REPLY_PORT = 52381
@@ -620,9 +769,11 @@ class StreamFinder:
     page opens or its refresh button is pressed. Nothing is looked for on a timer.
     """
 
-    def __init__(self, cameras, ffmpeg=None):
+    def __init__(self, cameras, ffmpeg=None, relay=None):
         self.cameras = cameras
         self.ffmpeg = ffmpeg
+        # With the relay running, a camera's RTSP stream goes to the page as WebRTC, untouched, and ffmpeg is not needed.
+        self.relay = relay if relay is not None and relay.running else None
         self.found = [{"state": "looking", "id": 0} for _ in cameras]
         self.changes = 0
         self.closed = threading.Event()
@@ -661,6 +812,8 @@ class StreamFinder:
         # A new id each time the answer changes tells the page to load the picture afresh.
         self.changes += 1
         self.found[index] = {**found, "id": self.changes}
+        if self.relay:
+            self.relay.show_cameras({place: entry["url"] for place, entry in enumerate(self.found) if entry.get("kind") == "rtsp"})
 
     def _find(self, camera):
         if camera["streamUrl"]:
@@ -699,8 +852,9 @@ class StreamFinder:
                 return True
             if status not in {200, 401}:
                 return False
-            found = {"state": "found", "kind": "rtsp", "url": url, "address": without_sign_in(url), "playable": bool(self.ffmpeg)}
-            if not self.ffmpeg:
+            found = {"state": "found", "kind": "rtsp", "url": url, "address": without_sign_in(url), "playable": bool(self.relay or self.ffmpeg),
+                     "webrtc": bool(self.relay)}
+            if not self.relay and not self.ffmpeg:
                 found["note"] = "This camera streams RTSP, which a browser cannot show. Install ffmpeg on the computer running the controller to see it here."
             return found
         try:
@@ -822,6 +976,7 @@ def load_config():
     config = {**DEFAULT_CONFIG, **saved}
     config["cameras"] = clean_cameras(config["cameras"])
     config["vdo"] = clean_vdo(config.get("vdo"))
+    config["relay"] = clean_relay(config.get("relay"))
     config["google"] = clean_google(None, config.get("google"))
     config.pop("mail", None)
     if not config.get("password"):
@@ -847,6 +1002,7 @@ class Handler(BaseHTTPRequestHandler):
     config = None
     camera_settings = []
     vdo = None
+    relay = None
     google = clean_google(None)
     # The one Google sign-in under way, so that only the answer to our own request is accepted.
     google_state = None
@@ -881,7 +1037,9 @@ class Handler(BaseHTTPRequestHandler):
                 cls.streams.close()
             cls.camera_settings = camera_settings
             cls.cameras = CameraLink(camera_settings, **link_options)
-            cls.streams = StreamFinder(camera_settings, cls.ffmpeg)
+            if cls.relay:
+                cls.relay.show_cameras({})
+            cls.streams = StreamFinder(camera_settings, cls.ffmpeg, cls.relay)
 
     def _camera_list(self):
         streams = self.streams.status() if self.streams else []
@@ -941,6 +1099,19 @@ class Handler(BaseHTTPRequestHandler):
         requested = urlsplit(self.path).path
         if requested == "/":
             requested = "/index.html"
+        if requested == "/feed":
+            # The picture on its own, for a tablet or a second screen. A device that isn't signed in shows the view key instead.
+            key = parse_qs(urlsplit(self.path).query).get("key", [""])[0]
+            if self.relay and (self._signed_in() or hmac.compare_digest(key, self.relay.settings["viewKey"])):
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(FEED_PAGE)))
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                self.wfile.write(FEED_PAGE)
+            else:
+                self._json(404 if not self.relay else 401, {"error": "The video relay is not running" if not self.relay else "This link's view key is not right"})
+            return
         if not self._signed_in():
             if requested == "/index.html":
                 self.send_response(200)
@@ -1058,6 +1229,8 @@ class Handler(BaseHTTPRequestHandler):
         listening = self.server.server_address[0]
         return {"remote": {"password": self.password, "port": self.server.server_port, "on": listening not in {"127.0.0.1", "::1", "localhost"},
                            "addresses": own_addresses()},
+                "relay": {"running": bool(self.relay and self.relay.running), "port": self.relay.settings["webrtcPort"] if self.relay else 0,
+                          "key": self.relay.settings["viewKey"] if self.relay else ""},
                 "vdo": self.vdo, "links": vdo_links(self.vdo) if self.vdo else {},
                 "mail": {"address": self.google["email"], "ready": bool(self.google["refreshToken"]), "clientId": self.google["clientId"],
                          "clientReady": bool(self.google["clientId"] and self.google["clientSecret"])}}
@@ -1184,6 +1357,8 @@ def start(config=None):
     Handler.password = config["password"]
     Handler.secret = config["secret"]
     server = ThreadingHTTPServer((config["host"], config["port"]), Handler)
+    Handler.relay = MediaRelay(config["relay"], find_program("mediamtx", config.get("mediamtx", "")))
+    Handler.relay.start()
     Handler.set_cameras(config["cameras"])
     return server
 
@@ -1192,12 +1367,15 @@ def stop(server):
     """Stop every camera, then shut the bridge down."""
     Handler.cameras.close()
     Handler.streams.close()
+    if Handler.relay:
+        Handler.relay.stop()
+        Handler.relay = None
     server.server_close()
 
 
 if __name__ == "__main__":
     server = start()
-    print(f"PTZ Game Controller running at http://127.0.0.1:{server.server_port} (ffmpeg: {Handler.ffmpeg or 'not found'})", flush=True)
+    print(f"PTZ Game Controller running at http://127.0.0.1:{server.server_port} (ffmpeg: {Handler.ffmpeg or 'not found'}; video relay: {'running' if Handler.relay.running else 'not found'})", flush=True)
 
     def interrupt(*_):
         raise KeyboardInterrupt
