@@ -21,7 +21,7 @@ Drive PTZ cameras from a game controller, in a dock inside OBS Studio or in any 
 
 **macOS (Apple silicon)**
 
-1. Double-click `ptz-field-controller-1.2.0-macos-arm64.pkg` and click through the installer. It puts the plugin in your OBS plugins folder; there are no files to move and no password to enter.
+1. Double-click `ptz-field-controller-1.2.1-macos-arm64.pkg` and click through the installer. It puts the plugin in your OBS plugins folder; there are no files to move and no password to enter.
 2. Open OBS (quit and reopen it if it was running). The controller appears as its own panel the first time; drag it into the OBS window to dock it. Later it is under Docks → PTZ Field Controller.
 3. Press the gear in the panel, enter each camera's IP address, and save.
 4. Plug in the controller and press any button on it.
@@ -61,7 +61,7 @@ Invite collaborators keeps the crew's email addresses and sends each their link,
 
 ## Other computers
 
-The controller can be opened from another computer at `http://<this computer>:8765` with the password in `config.json` (made the first time the bridge runs). Set `"host": "127.0.0.1"` there to turn that off.
+The controller can be opened from another computer at `http://<this computer>:8765`. A password is made up for this the first time the controller runs; settings shows it, with the address to use, and lets you change it. Set `"host": "127.0.0.1"` in `config.json` to turn remote access off.
 
 ## Good to know
 
