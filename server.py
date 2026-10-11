@@ -54,6 +54,13 @@ ADJUSTMENT_SECONDS = 2
 CLIENT_VERSION = 8
 
 MAX_CAMERAS = 64
+# How each kind of camera is spoken to, and the port it usually listens on.
+#   sony       VISCA over IP as Sony does it: UDP, each command wrapped in a numbered header.
+#   visca-udp  the bare VISCA command in a UDP packet (PTZOptics and most other makes).
+#   visca-tcp  the bare VISCA command down a TCP connection (the same makes; some only offer this).
+CAMERA_TYPES = {"sony": 52381, "visca-udp": 1259, "visca-tcp": 5678}
+# A bare-VISCA camera that stays silent is taken to have got a command after this many sends.
+PLAIN_VISCA_TRIES = 3
 # The controller buttons that select the first three cameras until the settings page says otherwise:
 # left stick click, right stick click, Start.
 SELECT_BUTTONS = [10, 11, 9]
@@ -72,7 +79,10 @@ def clean_cameras(cameras):
         host = str(camera.get("host") or "").strip()
         if len(host) > 253 or not re.fullmatch(r"[A-Za-z0-9.:-]*", host):
             raise ValueError(f"{label}: \"{host}\" is not an IP address or host name")
-        port = camera.get("port", 52381)
+        kind = camera.get("type", "sony")
+        if kind not in CAMERA_TYPES:
+            raise ValueError(f"{label}: \"{kind}\" is not a kind of camera the controller knows")
+        port = camera.get("port", CAMERA_TYPES[kind])
         if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535:
             raise ValueError(f"{label}: the port must be a whole number from 1 to 65535")
         stream_url = str(camera.get("streamUrl") or "").strip()
@@ -84,7 +94,7 @@ def clean_cameras(cameras):
         key = camera.get("key", str(index + 1) if index < 9 else "")
         if not isinstance(key, str) or len(key) > 1:
             raise ValueError(f"{label}: the select key must be a single key")
-        cleaned.append({"name": name, "host": host, "port": port, "streamUrl": stream_url, "button": button, "key": key.lower()})
+        cleaned.append({"name": name, "type": kind, "host": host, "port": port, "streamUrl": stream_url, "button": button, "key": key.lower()})
     return cleaned
 
 TIMEOUT = 1.5
@@ -281,6 +291,8 @@ class CameraLink:
             self.hears_replies = False
         self.cameras = [
             {"name": camera["name"], "address": (camera.get("host", ""), int(camera.get("port", 52381))), "changed": threading.Condition(),
+             # Anything but "sony" takes bare VISCA: no numbering, no resets, and its own connection for replies.
+             "type": camera.get("type", "sony"), "link": None, "tries": 0, "retry_at": 0.0,
              # want_*: what the sticks ask for now. have_*: what the camera has confirmed it is doing.
              "want_pan_tilt": STILL, "want_zoom": STILL, "have_pan_tilt": STILL, "have_zoom": STILL,
              "active": False, "needs_reset": False, "sequence": 0, "awaiting": None, "answered": False,
@@ -290,6 +302,10 @@ class CameraLink:
             for camera in cameras
         ]
         for camera in self.cameras:
+            if camera["type"] == "visca-udp":
+                camera["link"] = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                camera["link"].bind(("0.0.0.0", 0))
+                threading.Thread(target=self._read_plain_replies, args=(camera, camera["link"]), daemon=True).start()
             threading.Thread(target=self._run, args=(camera,), daemon=True).start()
         threading.Thread(target=self._read_replies, daemon=True).start()
         threading.Thread(target=self._watch, daemon=True).start()
@@ -318,7 +334,7 @@ class CameraLink:
     def status(self):
         """Per camera: whether a move is in progress, and whether the camera has confirmed everything asked of it."""
         return [
-            {"name": camera["name"], "moving": camera["active"],
+            {"name": camera["name"], "moving": self._busy(camera),
              "confirmed": camera["want_pan_tilt"] == camera["have_pan_tilt"] and camera["want_zoom"] == camera["have_zoom"]}
             for camera in self.cameras
         ]
@@ -333,10 +349,63 @@ class CameraLink:
         """Stop every camera and wait (briefly) for each to confirm before shutting down."""
         self.stop_all()
         deadline = time.monotonic() + 1.5
-        while time.monotonic() < deadline and any(camera["active"] for camera in self.cameras):
+        while time.monotonic() < deadline and any(self._busy(camera) for camera in self.cameras):
             time.sleep(0.02)
         self.closed = True
         self.sock.close()
+        for camera in self.cameras:
+            if camera["link"]:
+                camera["link"].close()
+
+    @staticmethod
+    def _busy(camera):
+        """Whether the camera is still doing, or still owed, something."""
+        if camera["type"] == "sony":
+            return camera["active"]
+        return camera["have_pan_tilt"] != STILL or camera["have_zoom"] != STILL or camera["want_pan_tilt"] != STILL or camera["want_zoom"] != STILL
+
+    def _send_plain(self, camera, payload):
+        """Send a bare VISCA command over the camera's own UDP socket or TCP connection, connecting first if need be."""
+        if camera["type"] == "visca-udp":
+            camera["link"].sendto(payload, camera["address"])
+            return
+        if camera["link"] is None:
+            if time.monotonic() < camera["retry_at"]:
+                raise OSError("waiting before connecting again")
+            # A camera that is switched off must not be hammered with connections, nor hold the sticks up for long.
+            camera["retry_at"] = time.monotonic() + 2
+            link = socket.create_connection(camera["address"], timeout=0.5)
+            link.settimeout(None)
+            link.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+            camera["link"] = link
+            threading.Thread(target=self._read_plain_replies, args=(camera, link), daemon=True).start()
+        try:
+            camera["link"].sendall(payload)
+        except OSError:
+            camera["link"].close()
+            camera["link"] = None
+            raise
+
+    def _read_plain_replies(self, camera, link):
+        """Replies from a bare-VISCA camera: any answer means the command in flight arrived, unless the camera says it was too busy."""
+        while not self.closed:
+            try:
+                data = link.recv(64)
+            except OSError:
+                data = b""
+            if not data:
+                if camera["type"] == "visca-udp" and not self.closed:
+                    continue
+                with camera["changed"]:
+                    if camera["link"] is link:
+                        link.close()
+                        camera["link"] = None
+                return
+            too_busy = len(data) >= 3 and data[1] & 0xF0 == 0x60 and data[2] == 0x03
+            with camera["changed"]:
+                if camera["awaiting"] is not None and not too_busy:
+                    camera["answered"] = True
+                    camera["changed"].notify_all()
 
     def _run(self, camera):
         changed = camera["changed"]
@@ -357,7 +426,21 @@ class CameraLink:
                 if step is None:
                     continue
                 axis, value = step
-                if axis == "reset":
+                if camera["type"] != "sony":
+                    payload = value if axis == "once" else self._pan_tilt(*value) if axis == "pan_tilt" else self._zoom(*value)
+                    camera["awaiting"], camera["answered"] = True, False
+                    camera["sent_at"] = time.monotonic()
+                    try:
+                        self._send_plain(camera, payload)
+                        camera["tries"] += 1
+                    except OSError:
+                        camera["tries"] = 0
+                    changed.wait_for(lambda: camera["answered"] or self.closed, ACK_TIMEOUT)
+                    answered, camera["awaiting"] = camera["answered"] or camera["tries"] >= PLAIN_VISCA_TRIES, None
+                    if not answered:
+                        continue
+                    camera["tries"] = 0
+                elif axis == "reset":
                     camera["sequence"] = 0
                     camera["needs_reset"] = False
                     kind, payload = VISCA_CONTROL, b"\x01"
@@ -365,19 +448,20 @@ class CameraLink:
                     camera["sequence"] += 1
                     kind = VISCA_COMMAND
                     payload = value if axis == "once" else self._pan_tilt(*value) if axis == "pan_tilt" else self._zoom(*value)
-                camera["awaiting"] = camera["sequence"]
-                camera["answered"] = not self.hears_replies
-                camera["sent_at"] = time.monotonic()
-                try:
-                    self.sock.sendto(struct.pack(">HHI", kind, len(payload), camera["sequence"]) + payload, camera["address"])
-                except OSError:
-                    camera["answered"] = False
-                changed.wait_for(lambda: camera["answered"] or camera["needs_reset"] or self.closed, ACK_TIMEOUT)
-                answered, camera["awaiting"] = camera["answered"], None
-                if not answered:
-                    # An unanswered reset has to be tried again before anything else can land.
-                    camera["needs_reset"] = camera["needs_reset"] or axis == "reset"
-                    continue
+                if camera["type"] == "sony":
+                    camera["awaiting"] = camera["sequence"]
+                    camera["answered"] = not self.hears_replies
+                    camera["sent_at"] = time.monotonic()
+                    try:
+                        self.sock.sendto(struct.pack(">HHI", kind, len(payload), camera["sequence"]) + payload, camera["address"])
+                    except OSError:
+                        camera["answered"] = False
+                    changed.wait_for(lambda: camera["answered"] or camera["needs_reset"] or self.closed, ACK_TIMEOUT)
+                    answered, camera["awaiting"] = camera["answered"], None
+                    if not answered:
+                        # An unanswered reset has to be tried again before anything else can land.
+                        camera["needs_reset"] = camera["needs_reset"] or axis == "reset"
+                        continue
                 if axis == "reset":
                     # A reset while nothing is asked for is the one that ends a move.
                     camera["active"] = value
@@ -400,9 +484,10 @@ class CameraLink:
         once = camera["once"]
         while once and once[0][1] < time.monotonic():
             once.pop(0)
-        if not camera["active"]:
+        plain = camera["type"] != "sony"
+        if not plain and not camera["active"]:
             return ("reset", True) if moving or once else None
-        if camera["needs_reset"]:
+        if not plain and camera["needs_reset"]:
             return ("reset", True)
         behind = [axis for axis in want if want[axis] != have[axis]]
         # Stops go first, then one-off commands; otherwise the two axes take turns so neither waits on the other.
@@ -412,7 +497,7 @@ class CameraLink:
         if once:
             return ("once", once[0][0])
         if not behind:
-            return None if moving else ("reset", False)
+            return None if moving or plain else ("reset", False)
         axis = next((axis for axis in behind if axis != camera["last_axis"]), behind[0])
         return (axis, want[axis])
 
@@ -439,7 +524,7 @@ class CameraLink:
                 continue
             kind, _, sequence = struct.unpack(">HHI", data[:8])
             for camera in self.cameras:
-                if camera["address"][0] != source[0]:
+                if camera["address"][0] != source[0] or camera["type"] != "sony":
                     continue
                 with camera["changed"]:
                     if kind == VISCA_CONTROL and data[8:10] == b"\x0f\x01":

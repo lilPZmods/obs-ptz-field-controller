@@ -269,14 +269,107 @@ class BridgeTests(unittest.TestCase):
         self.assertEqual(self.drive(pan=5), 200)
         self.assertEqual(self.camera.packets(), [])
 
+    # Cameras that take plain VISCA (PTZOptics and most other makes)
+
+    def plain_udp_camera(self, answer=True):
+        """A UDP socket standing in for a plain-VISCA camera: records each bare command and acknowledges it."""
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.bind(("127.0.0.1", 0))
+        sock.settimeout(0.02)
+        received, state = [], {"closed": False}
+
+        def serve():
+            while not state["closed"]:
+                try:
+                    data, sender = sock.recvfrom(64)
+                except OSError:
+                    continue
+                received.append(data.hex())
+                if answer:
+                    sock.sendto(b"\x90\x41\xff", sender)
+
+        threading.Thread(target=serve, daemon=True).start()
+        self.addCleanup(sock.close)
+        self.addCleanup(state.update, closed=True)
+        return sock.getsockname()[1], received
+
+    def test_plain_visca_over_udp_sends_bare_commands_with_no_resets(self):
+        port, received = self.plain_udp_camera()
+        self.use_cameras([{"name": "PTZ1", "type": "visca-udp", "host": "127.0.0.1", "port": port}])
+        self.assertEqual(self.drive(pan=10, tilt=-4), 200)
+        time.sleep(0.3)
+        self.assertEqual(received, ["810106010a040202ff"])
+        self.assertTrue(self.session()["cameras"][0]["moving"])
+        self.drive()
+        self.send(self.command("red_up"))
+        time.sleep(0.3)
+        self.assertEqual(received[1:], [STOP_PAN, "8101040302ff"])
+        self.assertFalse(self.session()["cameras"][0]["moving"])
+
+    def test_plain_visca_camera_that_never_answers_is_not_sent_the_same_thing_forever(self):
+        port, received = self.plain_udp_camera(answer=False)
+        self.use_cameras([{"name": "PTZ1", "type": "visca-udp", "host": "127.0.0.1", "port": port}])
+        self.drive(zoom=1, zoom_speed=3)
+        # Short of the point where the bridge stops a camera whose page has gone quiet.
+        time.sleep(0.6)
+        self.assertEqual(received, ["8101040723ff"] * 3)
+
+    def test_plain_visca_over_tcp(self):
+        listener = socket.socket()
+        listener.bind(("127.0.0.1", 0))
+        listener.listen()
+        self.addCleanup(listener.close)
+        received = []
+
+        def serve():
+            try:
+                link, _ = listener.accept()
+            except OSError:
+                return
+            self.addCleanup(link.close)
+            while True:
+                try:
+                    data = link.recv(64)
+                except OSError:
+                    return
+                if not data:
+                    return
+                received.append(data.hex())
+                link.sendall(b"\x90\x41\xff")
+
+        threading.Thread(target=serve, daemon=True).start()
+        self.use_cameras([{"name": "PTZ1", "type": "visca-tcp", "host": "127.0.0.1", "port": listener.getsockname()[1]}])
+        self.drive(pan=-3)
+        time.sleep(0.3)
+        self.drive()
+        time.sleep(0.3)
+        self.assertEqual(received, ["8101060103010103ff", STOP_PAN])
+
+    def test_plain_visca_over_tcp_to_a_camera_that_is_off_does_not_hold_things_up(self):
+        closed = socket.socket()
+        closed.bind(("127.0.0.1", 0))
+        port = closed.getsockname()[1]
+        closed.close()
+        self.use_cameras([{"name": "PTZ1", "type": "visca-tcp", "host": "127.0.0.1", "port": port}])
+        started = time.monotonic()
+        for pan in (4, 5, 6):
+            self.assertEqual(self.drive(pan=pan), 200)
+        self.assertLess(time.monotonic() - started, 1.0)
+
+    def test_each_kind_of_camera_gets_its_usual_port(self):
+        cameras = clean_cameras([{"name": "A"}, {"name": "B", "type": "visca-udp"}, {"name": "C", "type": "visca-tcp"}, {"name": "D", "type": "visca-tcp", "port": 1234}])
+        self.assertEqual([(camera["type"], camera["port"]) for camera in cameras], [("sony", 52381), ("visca-udp", 1259), ("visca-tcp", 5678), ("visca-tcp", 1234)])
+        with self.assertRaises(ValueError):
+            clean_cameras([{"name": "A", "type": "pelco"}])
+
     # Cameras entered on the settings page
 
     def test_saved_cameras_are_written_to_config_and_driven(self):
         second = FakeCamera()
         self.addCleanup(second.close)
         cameras = [
-            {"name": "Stage", "host": "127.0.0.1", "port": self.camera.port, "streamUrl": "", "button": 10, "key": "1"},
-            {"name": "Balcony", "host": "127.0.0.1", "port": second.port, "streamUrl": "", "button": 4, "key": "q"},
+            {"name": "Stage", "type": "sony", "host": "127.0.0.1", "port": self.camera.port, "streamUrl": "", "button": 10, "key": "1"},
+            {"name": "Balcony", "type": "sony", "host": "127.0.0.1", "port": second.port, "streamUrl": "", "button": 4, "key": "q"},
         ]
         with tempfile.TemporaryDirectory() as folder, mock.patch.object(server, "CONFIG_PATH", Path(folder) / "config.json"), \
                 mock.patch.object(server, "CameraLink", functools.partial(server.CameraLink, reply_port=0, send_gap=0.01)):

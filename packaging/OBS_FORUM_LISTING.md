@@ -6,7 +6,7 @@ For https://obsproject.com/forum/resources/ → Add resource. Category: **OBS St
 
 **Tag line:** Drive PTZ cameras from a game controller, in an OBS dock
 
-**Version:** 1.2.1
+**Version:** 1.3.0
 
 **Supported platforms:** macOS on Apple silicon as a compiled plugin; Windows, Linux and Intel Macs through the included OBS script
 
@@ -24,7 +24,7 @@ For https://obsproject.com/forum/resources/ → Add resource. Category: **OBS St
 
 PTZ Field Controller turns a game controller into a PTZ joystick, docked inside OBS.
 
-The right stick pans and tilts, the left stick zooms, and speed follows how far you push, the way a hardware joystick controller behaves. Cameras are driven directly over the network with VISCA over IP (Sony's UDP form, port 52381), so there is nothing between the stick and the camera to add lag.
+The right stick pans and tilts, the left stick zooms, and speed follows how far you push, the way a hardware joystick controller behaves. Cameras are driven directly over the network with VISCA (Sony's form, or plain VISCA over UDP or TCP for PTZOptics and most other makes), so there is nothing between the stick and the camera to add lag.
 
 **Features**
 
@@ -40,7 +40,7 @@ The right stick pans and tilts, the left stick zooms, and speed follows how far 
 **Requirements**
 
 - macOS on Apple silicon, OBS 32. Nothing else to install
-- Cameras that accept VISCA over IP on UDP. Developed with Sony SRG cameras
+- Cameras that accept VISCA over the network. Developed with Sony SRG cameras; plain VISCA for other makes is new and not yet confirmed on real hardware, so reports are welcome
 - A controller with the standard layout (Xbox, PlayStation and most others)
 
 **Install (macOS, Apple silicon)**

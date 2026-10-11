@@ -88,7 +88,9 @@ const keyboardHeld = new Set();
 const byId = (id) => document.getElementById(id);
 const twoDigits = (number) => String(number).padStart(2, "0");
 const escapeHtml = (text) => String(text).replace(/[&<>"]/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[character]);
-const cameraSettings = (camera) => ({ name: camera.name.trim(), host: camera.host.trim(), port: camera.port, streamUrl: camera.streamUrl.trim(), button: camera.button, key: camera.key });
+// The kinds of camera the bridge can drive, with the port each usually listens on.
+const CAMERA_TYPES = { sony: ["SONY VISCA", 52381], "visca-udp": ["VISCA UDP", 1259], "visca-tcp": ["VISCA TCP", 5678] };
+const cameraSettings = (camera) => ({ name: camera.name.trim(), type: camera.type, host: camera.host.trim(), port: camera.port, streamUrl: camera.streamUrl.trim(), button: camera.button, key: camera.key });
 
 function setTheme(theme) {
   document.documentElement.dataset.theme = theme;
@@ -449,6 +451,7 @@ function renderCameraRows() {
       <input data-field="host" aria-label="${label} IP address" maxlength="253" placeholder="IP address" spellcheck="false" autocapitalize="off" value="${escapeHtml(camera.host)}" />
       <input data-field="port" aria-label="${label} VISCA port" type="number" min="1" max="65535" value="${camera.port}" />
       <button class="remove-camera" type="button" data-remove aria-label="Remove ${label}" title="Remove this camera">×</button>
+      <select data-field="type" aria-label="${label} kind of camera" title="How the camera is spoken to. Sony cameras use Sony VISCA; PTZOptics and most other makes use plain VISCA over UDP or TCP.">${Object.entries(CAMERA_TYPES).map(([type, [name]]) => `<option value="${type}"${camera.type === type ? " selected" : ""}>${name}</option>`).join("")}</select>
       <button class="select-button" type="button" data-assign title="Change the button or key that selects this camera">SELECT WITH: ${escapeHtml(shortcut(camera).text)}</button>
       <input class="stream-field" data-field="streamUrl" aria-label="${label} stream address" placeholder="Stream address (optional, found automatically)" spellcheck="false" autocapitalize="off" value="${escapeHtml(camera.streamUrl)}" />
       <p class="stream-state"></p>
@@ -532,7 +535,7 @@ function addCamera() {
   }
   const number = draft.length + 1;
   const key = number <= 9 && !draft.some((camera) => camera.key === String(number)) ? String(number) : "";
-  draft.push({ name: `PTZ${number}`, host: "", port: 52381, streamUrl: "", button: null, key, from: null });
+  draft.push({ name: `PTZ${number}`, type: "sony", host: "", port: 52381, streamUrl: "", button: null, key, from: null });
   renderCameraRows();
   byId("cameraList").lastElementChild.scrollIntoView({ block: "nearest" });
   openAssignPrompt(draft.length - 1);
@@ -765,7 +768,18 @@ function initialize() {
   byId("cameraList").addEventListener("input", (event) => {
     const row = event.target.closest(".camera-row");
     const field = event.target.dataset.field;
-    if (row && field) draft[Number(row.dataset.index)][field] = field === "port" ? Number(event.target.value) : event.target.value;
+    if (!row || !field) return;
+    const camera = draft[Number(row.dataset.index)];
+    if (field === "type") {
+      // Changing the kind of camera moves the port to that kind's usual one, unless a port of your own was typed.
+      if (camera.port === CAMERA_TYPES[camera.type][1]) {
+        camera.port = CAMERA_TYPES[event.target.value][1];
+        row.querySelector('[data-field="port"]').value = camera.port;
+      }
+      camera.type = event.target.value;
+    } else {
+      camera[field] = field === "port" ? Number(event.target.value) : event.target.value;
+    }
   });
   byId("cameraList").addEventListener("click", (event) => {
     const row = event.target.closest(".camera-row");
