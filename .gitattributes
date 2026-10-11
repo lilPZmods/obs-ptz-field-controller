@@ -1,3 +1,0 @@
-# The iPad and Android apps are kept out of the published source.
-ios export-ignore
-android export-ignore

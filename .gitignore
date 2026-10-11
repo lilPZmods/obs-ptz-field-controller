@@ -25,3 +25,6 @@ relay.yml
 relay.yml.part
 auto.crt
 auto.key
+# The iPad and Android apps are not published. Each keeps its own history on this Mac only.
+ios/
+android/
