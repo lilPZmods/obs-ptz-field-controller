@@ -3,7 +3,7 @@
 Drive PTZ cameras from a game controller, in a dock inside OBS Studio or in any browser.
 
 - **Right stick** pans and tilts, **left stick** zooms. Speed follows how far the stick is pushed, like a hardware joystick controller.
-- Cameras are driven directly with **VISCA over IP** (Sony's UDP form, port 52381).
+- Cameras are driven directly with **VISCA over the network**: Sony's form (UDP 52381), or plain VISCA over UDP or TCP as PTZOptics and most other makes use.
 - Any number of cameras. Each is selected with a controller button or a keyboard key of your choosing.
 - If the selected camera offers a video stream the browser can show, it appears above the controls.
 - Dark by default, with a light theme.
@@ -14,14 +14,14 @@ Drive PTZ cameras from a game controller, in a dock inside OBS Studio or in any 
 
 - OBS Studio 32 for the macOS plugin (it is built against OBS 32.2). The script works with OBS 28 or later.
 - Nothing else on a Mac: the plugin carries everything it needs. (The script for other platforms needs Python 3.9 or later.)
-- Cameras that take VISCA over IP on UDP, on the same network. Developed with Sony SRG cameras.
+- Cameras that take VISCA over the network, on the same network. Developed and used daily with Sony SRG cameras; plain VISCA (PTZOptics and others) is supported but not yet confirmed on real hardware.
 - A game controller with the standard layout (Xbox, PlayStation and most others).
 
 ## Install
 
 **macOS (Apple silicon)**
 
-1. Double-click `ptz-field-controller-1.2.1-macos-arm64.pkg` and click through the installer. It puts the plugin in your OBS plugins folder; there are no files to move and no password to enter.
+1. Double-click `ptz-field-controller-1.3.0-macos-arm64.pkg` and click through the installer. It puts the plugin in your OBS plugins folder; there are no files to move and no password to enter.
 2. Open OBS (quit and reopen it if it was running). The controller appears as its own panel the first time; drag it into the OBS window to dock it. Later it is under Docks → PTZ Field Controller.
 3. Press the gear in the panel, enter each camera's IP address, and save.
 4. Plug in the controller and press any button on it.

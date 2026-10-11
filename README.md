@@ -22,7 +22,7 @@ A game-controller interface for Sony PTZ cameras (three to start with; add as ma
 The gear button opens settings.
 
 - **Dark mode** is on by default. The switch here, or the sun/moon button in the top bar, changes it. The choice is remembered per browser.
-- **Cameras**: each camera's name, IP address and VISCA port (52381 on Sony cameras), the button and key that select it, and an optional stream address. **Save settings** writes the list to `config.json` on this computer and starts using it straight away, for every computer that has the controller open.
+- **Cameras**: each camera's name, kind, IP address and port, the button and key that select it, and an optional stream address. **Save settings** writes the list to `config.json` on this computer and starts using it straight away, for every computer that has the controller open.
 - **Add camera** adds another and asks which controller button should select it. The spare buttons are the stick clicks, Start, Back, the two bumpers and D-pad left/right. When they are all taken the prompt says so and the camera is selected from the keyboard instead: number keys 1–9 are given out automatically, and any other free key can be pressed to set it.
 - **Remote access**: the password other computers sign in with. One is made up when the controller is first set up; it is shown here and can be changed to your own. Changing it signs out every other computer.
 - **VDO.Ninja**: the room's address, name, feed name and passwords. They are made up the first time the bridge runs; change them only to use a room you already have. **New room** makes fresh ones.
@@ -56,7 +56,21 @@ The sign-in is kept in `config.json` on this computer and renewed by itself; the
 
 In the OBS dock only **another device** is offered; a separate OBS plugin will handle viewing there.
 
+## Kinds of camera
+
+Each camera in settings has a kind, which decides how it is spoken to:
+
+| Kind | For | Usual port |
+| --- | --- | --- |
+| Sony VISCA | Sony SRG, BRC and similar | UDP 52381 |
+| VISCA UDP | PTZOptics and most other makes | UDP 1259 |
+| VISCA TCP | The same makes, where only TCP is offered | TCP 5678 |
+
+The commands are the same VISCA in every case; only the wrapping differs. Sony VISCA is the one used daily on real cameras. The two plain kinds are written from the published protocol and tested against stand-in cameras, not yet on real hardware. Brightness and colour use Sony's commands, which most VISCA cameras share but not all.
+
 ## How the cameras are driven
+
+What follows describes Sony VISCA. Plain VISCA has no command numbering, so none of the resets apply; the pacing and the answered-before-done rule are the same.
 
 Another controller on the network, such as Companion, can share each camera with this one. A camera only accepts a command numbered higher than the last one it saw, so the controller resets the camera's count when a move starts and again when it ends, which keeps the other controller's commands working in between. If it sends a command to a camera in the middle of a stick move, the controller notices the camera refusing its next command, resets, and carries on.
 

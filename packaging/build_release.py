@@ -14,7 +14,7 @@ import tempfile
 import zipfile
 from pathlib import Path
 
-VERSION = "1.2.1"
+VERSION = "1.3.0"
 ROOT = Path(__file__).parent.parent
 FOLDER = "ptz-field-controller"
 IDENTIFIER = "ca.arraymusic.ptz-field-controller"
