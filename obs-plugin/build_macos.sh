@@ -40,7 +40,20 @@ clang++ -arch "$ARCH" -mmacosx-version-min=13.0 -bundle \
 
 cp obs-plugin/Info.plist "$OUT/Contents/Info.plist"
 cp server.py index.html app.css app.js qrcode.js LICENSE "$OUT/Contents/Resources/"
-codesign --force --sign - "$OUT"
+
+# Package the bridge as a program of its own, Python included, so the plugin needs nothing installed.
+# Needs PyInstaller in .venv (.venv/bin/python3 -m pip install pyinstaller); without it the plugin
+# is built to run server.py with the computer's Python instead.
+if .venv/bin/python3 -m PyInstaller --version >/dev/null 2>&1; then
+  .venv/bin/python3 -m PyInstaller --noconfirm --log-level WARN --onedir --name ptz-bridge \
+    --distpath "$DEPS/frozen" --workpath "$DEPS/pyinstaller" --specpath "$DEPS" \
+    --add-data "$PWD/index.html:." --add-data "$PWD/app.css:." --add-data "$PWD/app.js:." --add-data "$PWD/qrcode.js:." \
+    server.py
+  cp -R "$DEPS/frozen/ptz-bridge" "$OUT/Contents/Resources/ptz-bridge"
+else
+  echo "PyInstaller not found: this build will need Python 3 on the computer it runs on."
+fi
+codesign --force --deep --sign - "$OUT"
 echo "Built $OUT"
 
 if [ "${1:-}" = "--install" ]; then

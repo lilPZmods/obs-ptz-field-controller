@@ -80,8 +80,10 @@ The bridge refuses commands from a browser tab running older page code; reload t
 
 `obs-plugin/` is a native OBS plugin. It adds **Docks → PTZ Field Controller** and, when no bridge is already running, starts one for as long as OBS is open.
 
-- Build and install: quit OBS, then `obs-plugin/build_macos.sh --install`. It needs only the command line tools, plus the OBS and Qt headers in `.build/` (the script's header says where they come from).
-- It is installed at `~/Library/Application Support/obs-studio/plugins/ptz-field-controller.plugin`. Delete that folder to remove it.
+- **Install**: double-click the `.pkg` from `dist/` (or the GitHub release). It puts the plugin in `~/Library/Application Support/obs-studio/plugins/`; nothing is moved by hand. The first time OBS opens afterwards, the dock shows itself.
+- The plugin carries the bridge as a ready-to-run program (packaged with PyInstaller), so the computer needs no Python.
+- **Build**: `obs-plugin/build_macos.sh`, then `python3 packaging/build_release.py` for the installer. It needs only the command line tools, the OBS and Qt headers in `.build/` (the script's header says where they come from) and PyInstaller in `.venv`.
+- The installer is not signed with an Apple developer certificate, so a downloaded copy must be opened with right-click → Open the first time.
 - `ptz_field_controller.py` (an OBS script) and `install_obs_dock.py` (adds a plain browser dock) do the same job without compiling, for Windows and Linux.
 
 `packaging/` holds what is needed to publish it: `build_release.py` makes the zips in `dist/`, `README.md` is the guide that goes inside them, and `OBS_FORUM_LISTING.md` is the text for the OBS forum's Resources page.

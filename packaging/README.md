@@ -13,27 +13,28 @@ Drive PTZ cameras from a game controller, in a dock inside OBS Studio or in any 
 ## What you need
 
 - OBS Studio 32 for the macOS plugin (it is built against OBS 32.2). The script works with OBS 28 or later.
-- Python 3.9 or later on the computer running OBS. Nothing else to install.
+- Nothing else on a Mac: the plugin carries everything it needs. (The script for other platforms needs Python 3.9 or later.)
 - Cameras that take VISCA over IP on UDP, on the same network. Developed with Sony SRG cameras.
 - A game controller with the standard layout (Xbox, PlayStation and most others).
 
 ## Install
 
-**macOS (Apple silicon), as a plugin**
+**macOS (Apple silicon)**
 
-1. Quit OBS. Copy `ptz-field-controller.plugin` into `~/Library/Application Support/obs-studio/plugins/`.
-2. Open OBS and tick Docks → PTZ Field Controller. The plugin starts the bridge, the small program that talks to the cameras, with the Python already on your Mac.
+1. Double-click `ptz-field-controller-1.2.0-macos-arm64.pkg` and click through the installer. It puts the plugin in your OBS plugins folder; there are no files to move and no password to enter.
+2. Open OBS (quit and reopen it if it was running). The controller appears as its own panel the first time; drag it into the OBS window to dock it. Later it is under Docks → PTZ Field Controller.
+3. Press the gear in the panel, enter each camera's IP address, and save.
+4. Plug in the controller and press any button on it.
+
+The installer is not signed with an Apple developer certificate, so the first time macOS says it "cannot be opened". Right-click the file and choose Open, or allow it under System Settings → Privacy & Security.
+
+To remove it, delete `~/Library/Application Support/obs-studio/plugins/ptz-field-controller.plugin`.
 
 **Windows, Linux and Intel Macs, as a script**
 
 1. Unzip the script folder somewhere it can stay.
 2. Tools → Scripts → Python Settings: point OBS at your Python. Then on the Scripts tab press **+** and choose `ptz_field_controller.py`.
 3. Docks → Custom Browser Docks: name it `PTZ Field Controller`, address `http://127.0.0.1:8765/?obs=1`.
-
-**Then, either way**
-
-1. In the dock, press the gear, enter each camera's IP address, and save.
-2. Plug in the controller and press any button on it. Browsers only reveal a controller after a button press.
 
 ## Using it
 
