@@ -261,7 +261,97 @@ def clean_relay(relay):
     if not re.fullmatch(r"[A-Za-z0-9]{8,64}", key):
         raise ValueError("The relay view key can only hold letters and numbers (8 or more)")
     return {"webrtcPort": port("webrtcPort", 8889), "udpPort": port("udpPort", 8189), "rtspPort": port("rtspPort", 8554),
-            "rtmpPort": port("rtmpPort", 1935), "viewKey": key, "hosts": hosts}
+            "rtmpPort": port("rtmpPort", 1935), "viewKey": key, "hosts": hosts,
+            # Whether the router is asked to let viewers in from outside this network. Off unless switched on in settings.
+            "outside": relay.get("outside") is True}
+
+
+def find_gateway():
+    """Look for the router on the local network (by UPnP). Returns the address of its description, or None."""
+    probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    probe.settimeout(2)
+    try:
+        for kind in ("urn:schemas-upnp-org:device:InternetGatewayDevice:1", "urn:schemas-upnp-org:device:InternetGatewayDevice:2"):
+            probe.sendto(f'M-SEARCH * HTTP/1.1\r\nHOST: 239.255.255.250:1900\r\nMAN: "ssdp:discover"\r\nMX: 1\r\nST: {kind}\r\n\r\n'.encode(), ("239.255.255.250", 1900))
+        answer = probe.recv(2048).decode("latin-1")
+    except OSError:
+        return None
+    finally:
+        probe.close()
+    location = re.search(r"(?im)^location:\s*(\S+)", answer)
+    return location.group(1) if location else None
+
+
+class PortForwarder:
+    """Asks the router to pass chosen ports in from the internet to this computer, the way games and video apps do (UPnP).
+
+    Nothing is opened unless outside viewing is switched on, and what was opened is closed again when it is switched off.
+    """
+
+    NAME = "PTZ Field video"
+
+    def __init__(self):
+        self.control = None
+        self.service = None
+        self.inside = ""
+        self.outside = ""
+        self.note = "Outside viewing is off"
+        self.opened = []
+
+    def _find(self):
+        location = find_gateway()
+        if not location:
+            raise RuntimeError("The router did not answer. Its UPnP setting may be off; forward the ports on the router by hand instead.")
+        with urlopen(location, timeout=4) as reply:
+            description = reply.read().decode("utf-8", "replace")
+        service = re.search(r"<serviceType>(urn:schemas-upnp-org:service:WAN(?:IP|PPP)Connection:\d)</serviceType>.*?<controlURL>([^<]+)</controlURL>", description, re.S)
+        if not service:
+            raise RuntimeError("The router does not offer port forwarding by UPnP; forward the ports on the router by hand instead.")
+        self.service = service.group(1)
+        self.control = f"{urlsplit(location).scheme}://{urlsplit(location).netloc}{service.group(2)}"
+        # This computer's address as the router sees it.
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
+            probe.connect((urlsplit(location).hostname, 9))
+            self.inside = probe.getsockname()[0]
+
+    def _ask(self, action, **fields):
+        body = "".join(f"<{name}>{value}</{name}>" for name, value in fields.items())
+        envelope = ('<?xml version="1.0"?><s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">'
+                    f'<s:Body><u:{action} xmlns:u="{self.service}">{body}</u:{action}></s:Body></s:Envelope>')
+        request = Request(self.control, data=envelope.encode(), headers={"Content-Type": 'text/xml; charset="utf-8"', "SOAPAction": f'"{self.service}#{action}"'})
+        try:
+            with urlopen(request, timeout=5) as reply:
+                return reply.read().decode("utf-8", "replace")
+        except HTTPError as error:
+            why = re.search(r"<errorDescription>([^<]*)", error.read().decode("utf-8", "replace"))
+            raise RuntimeError(f"The router refused: {why.group(1) if why else f'HTTP {error.code}'}")
+
+    def open(self, ports):
+        """Forward each (protocol, port). Returns whether it all worked; `note` says what happened either way."""
+        try:
+            self._find()
+            for protocol, port in ports:
+                self._ask("AddPortMapping", NewRemoteHost="", NewExternalPort=port, NewProtocol=protocol, NewInternalPort=port,
+                          NewInternalClient=self.inside, NewEnabled=1, NewPortMappingDescription=self.NAME, NewLeaseDuration=0)
+                if (protocol, port) not in self.opened:
+                    self.opened.append((protocol, port))
+            address = re.search(r"<NewExternalIPAddress>([^<]*)", self._ask("GetExternalIPAddress"))
+            self.outside = address.group(1) if address else ""
+            self.note = "The router is passing " + " and ".join(f"{protocol} {port}" for protocol, port in ports) + " in to this computer"
+            return True
+        except (RuntimeError, OSError, HTTPException) as error:
+            self.note = str(error) if isinstance(error, RuntimeError) else f"The router could not be asked: {error}"
+            return False
+
+    def close(self):
+        for protocol, port in self.opened:
+            try:
+                self._ask("DeletePortMapping", NewRemoteHost="", NewExternalPort=port, NewProtocol=protocol)
+            except (RuntimeError, OSError, HTTPException):
+                pass
+        self.opened = []
+        self.outside = ""
+        self.note = "Outside viewing is off"
 
 
 class MediaRelay:
@@ -283,6 +373,17 @@ class MediaRelay:
         self.config_path = Path(folder or CONFIG_PATH.parent) / "relay.yml"
         self.process = None
         self.cameras = {}
+        self.router = PortForwarder()
+
+    def let_outside_in(self, wanted):
+        """Open or close the way in from the internet, and tell viewers which outside address to use."""
+        self.settings = {**self.settings, "outside": wanted}
+        if wanted and self.running:
+            self.router.open([("TCP", self.settings["webrtcPort"]), ("UDP", self.settings["udpPort"])])
+        else:
+            self.router.close()
+        if self.program:
+            self._write()
 
     @property
     def running(self):
@@ -298,6 +399,9 @@ class MediaRelay:
                                             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         except OSError:
             self.process = None
+        if self.settings["outside"]:
+            # Asking the router takes a few seconds, so it doesn't hold the bridge's start up.
+            threading.Thread(target=self.let_outside_in, args=(True,), daemon=True).start()
 
     def stop(self):
         if self.process is None:
@@ -331,7 +435,8 @@ class MediaRelay:
             "rtsp": True, "rtspAddress": f"127.0.0.1:{settings['rtspPort']}", "rtspTransports": ["tcp"],
             "rtmp": True, "rtmpAddress": f"127.0.0.1:{settings['rtmpPort']}",
             "webrtc": True, "webrtcAddress": f":{settings['webrtcPort']}", "webrtcLocalUDPAddress": f":{settings['udpPort']}",
-            "webrtcAdditionalHosts": settings["hosts"],
+            # Viewers outside are told the outside address; viewers inside find the relay by its own addresses.
+            "webrtcAdditionalHosts": settings["hosts"] + ([self.router.outside] if self.router.outside and self.router.outside not in settings["hosts"] else []),
             "authMethod": "internal",
             "authInternalUsers": [
                 {"user": "any", "pass": "", "ips": ["127.0.0.1", "::1"], "permissions": [{"action": "publish"}, {"action": "read"}]},
@@ -1163,7 +1268,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         routes = {"/api/command": self._command, "/api/drive": self._drive, "/api/cameras": self._save_cameras,
-                  "/api/streams": self._look_for_streams, "/api/vdo": self._save_vdo, "/api/password": self._save_password, "/api/google": self._save_google,
+                  "/api/streams": self._look_for_streams, "/api/vdo": self._save_vdo, "/api/outside": self._save_outside, "/api/password": self._save_password, "/api/google": self._save_google,
                   "/api/google/signout": self._google_sign_out, "/api/invite": self._invite}
         route = routes.get(self.path)
         if route is None and self.path != "/api/login":
@@ -1230,7 +1335,9 @@ class Handler(BaseHTTPRequestHandler):
         return {"remote": {"password": self.password, "port": self.server.server_port, "on": listening not in {"127.0.0.1", "::1", "localhost"},
                            "addresses": own_addresses()},
                 "relay": {"running": bool(self.relay and self.relay.running), "port": self.relay.settings["webrtcPort"] if self.relay else 0,
-                          "key": self.relay.settings["viewKey"] if self.relay else ""},
+                          "key": self.relay.settings["viewKey"] if self.relay else "",
+                          "outside": bool(self.relay and self.relay.settings["outside"]),
+                          "outsideAddress": self.relay.router.outside if self.relay else "", "outsideNote": self.relay.router.note if self.relay else ""},
                 "vdo": self.vdo, "links": vdo_links(self.vdo) if self.vdo else {},
                 "mail": {"address": self.google["email"], "ready": bool(self.google["refreshToken"]), "clientId": self.google["clientId"],
                          "clientReady": bool(self.google["clientId"] and self.google["clientSecret"])}}
@@ -1247,6 +1354,20 @@ class Handler(BaseHTTPRequestHandler):
         self._check_version(data)
         self._keep("password", clean_password(data.get("password")))
         return {"ok": True, **self._room(), "_headers": [("Set-Cookie", self._session_cookie())]}
+
+    def _save_outside(self, data):
+        """Switch viewing from outside this network on or off. Asking the router takes a few seconds."""
+        self._check_version(data)
+        if not self.relay or not self.relay.running:
+            raise RuntimeError("The video relay is not running")
+        wanted = data.get("outside") is True
+        self.relay.let_outside_in(wanted)
+        if self.config is not None:
+            type(self).config = {**self.config, "relay": self.relay.settings}
+            save_config(self.config)
+        if wanted and not self.relay.router.opened:
+            raise RuntimeError(self.relay.router.note)
+        return {"ok": True, **self._room()}
 
     def _save_vdo(self, data):
         self._check_version(data)
